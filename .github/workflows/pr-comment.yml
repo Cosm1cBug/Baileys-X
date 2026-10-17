@@ -18,7 +18,10 @@ jobs:
 
       - uses: mshick/add-pr-comment@v2
         with:
-          repo-token: ${{ secrets.PERSONAL_TOKEN }}
+          # Use the PAT when the repository has one, otherwise fall back to the
+          # workflow token. pull_request_target grants it write access here, and
+          # this workflow never checks out or runs PR code, so that is safe.
+          repo-token: ${{ secrets.PERSONAL_TOKEN || secrets.GITHUB_TOKEN }}
           message-id: pr-test
           message: |
             Thanks for opening this pull request and contributing to the project!
