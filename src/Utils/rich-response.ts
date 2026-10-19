@@ -229,7 +229,7 @@ const parseLatexEntity = (
 	let padding = 8
 
 	const match = raw.match(/^(.*?)(?:\|(\d+)\|(\d+)(?:\|(\d+)(?:\|(\d+))?)?)?$/)
-	if (match && match[2] && match[3]) {
+	if (match?.[2] && match[3]) {
 		txt = match[1]!
 		width = Number(match[2])
 		height = Number(match[3])
@@ -951,7 +951,7 @@ export const tokenizeCode = (code: string, lang = 'javascript'): TokenizedCode =
 		}
 
 		const lastToken = tokens[tokens.length - 1]
-		if (lastToken && lastToken.highlightType === type) {
+		if (lastToken?.highlightType === type) {
 			lastToken.codeContent += content
 		} else {
 			tokens.push({ codeContent: content, highlightType: type })

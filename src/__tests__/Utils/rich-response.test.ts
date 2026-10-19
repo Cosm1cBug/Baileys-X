@@ -291,7 +291,9 @@ describe('AIRich', () => {
 	})
 
 	it('relays through the provided client', async () => {
-		const relayMessage = jest.fn(async (..._args: unknown[]) => undefined)
+		const relayMessage = jest.fn(async (jid: string) => {
+			if (!jid) throw new Error('missing jid')
+		})
 		await new AIRich().addText('hi').send({ relayMessage }, '1@s.whatsapp.net')
 		expect(relayMessage).toHaveBeenCalledTimes(1)
 		expect(relayMessage.mock.calls[0]![0]).toBe('1@s.whatsapp.net')
