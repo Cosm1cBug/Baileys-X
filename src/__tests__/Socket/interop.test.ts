@@ -1,5 +1,5 @@
-import { jest } from '@jest/globals'
 import { Boom } from '@hapi/boom'
+import { jest } from '@jest/globals'
 import type { SocketConfig } from '../../Types'
 import type { ILogger } from '../../Utils/logger'
 import type { BinaryNode } from '../../WABinary'

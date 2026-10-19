@@ -1,6 +1,6 @@
+import type { BinaryNode } from '../../WABinary'
 import { USyncPictureProtocol } from '../../WAUSync/Protocols/USyncPictureProtocol'
 import { USyncUser } from '../../WAUSync/USyncUser'
-import type { BinaryNode } from '../../WABinary'
 
 describe('USyncPictureProtocol', () => {
 	it('exposes a picture query element with the requested type', () => {
