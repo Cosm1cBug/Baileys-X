@@ -17,6 +17,7 @@ import {
 	assertMediaContent,
 	assertMeId,
 	bindWaitForEvent,
+	buildHtmlResponse,
 	buildStatusMentionContent,
 	decryptMediaRetryData,
 	DEF_MEDIA_HOST,
@@ -79,7 +80,7 @@ import {
 	shouldIncludeBizBinaryNode
 } from '../WABinary'
 import { USyncQuery, USyncUser } from '../WAUSync'
-import { makeNewsletterSocket } from './newsletter'
+import { makeUsernameSocket } from './username'
 
 /**
  * Whether a device JID is one of our own devices. A LID device is compared with
@@ -126,7 +127,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		enableRecentMessageCache,
 		maxMsgRetryCount
 	} = config
-	const sock = makeNewsletterSocket(config)
+	const sock = makeUsernameSocket(config)
 	const {
 		ev,
 		authState,
@@ -1363,6 +1364,60 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 	const waitForMsgMediaUpdate = bindWaitForEvent(ev, 'messages.media-update')
 
+	/** the platform of the paired primary device, lower-cased */
+	const getDeviceMode = (): string => (authState.creds.platform || '').toLowerCase()
+
+	/**
+	 * Interactive buttons do not render reliably when the paired device is an
+	 * iPhone; `sendInteractive` falls back to a plain text message there.
+	 */
+	const isIOSDevice = (): boolean => {
+		const platform = getDeviceMode()
+		return platform === 'ios' || platform === 'smbi'
+	}
+
+	const sendInteractive = async (
+		jid: string,
+		text: string,
+		options: { title?: string; subtitle?: string; footer?: string; buttonName?: string; quoted?: WAMessage } = {}
+	) => {
+		const { title = 'Bot', subtitle = '', footer = 'In-app signup', buttonName = 'inapp_signup', quoted } = options
+		const content: AnyMessageContent = isIOSDevice()
+			? { text }
+			: {
+					text,
+					title,
+					subtitle,
+					footer,
+					nativeFlow: [{ name: buttonName, paramsJson: '{}' }],
+					viewOnce: true
+				}
+		const userJid = authState.creds.me!.id
+		const fullMsg = await generateWAMessage(jid, content, {
+			logger,
+			userJid,
+			upload: waUploadToServer,
+			mediaCache: config.mediaCache,
+			options: config.options,
+			quoted,
+			messageId: generateMessageIDV2(sock.user?.id)
+		})
+		return relayMessage(jid, fullMsg.message!, { messageId: fullMsg.key.id! })
+	}
+
+	/** send an HTML payload rendered through Meta AI's rich-response HTML primitive */
+	const sendHtml = async (jid: string, html = '', opts: { contextInfo?: proto.IContextInfo } = {}) => {
+		const content = buildHtmlResponse(html)
+		const rich = content.botForwardedMessage?.message?.richResponseMessage
+		if (rich && opts.contextInfo) {
+			rich.contextInfo = { ...(rich.contextInfo || {}), ...opts.contextInfo }
+		}
+
+		const waMsg = generateWAMessageFromContent(jid, content, { userJid: authState.creds.me!.id })
+		await relayMessage(jid, waMsg.message!, { messageId: waMsg.key.id! })
+		return waMsg
+	}
+
 	registerSocketEndHandler(() => {
 		if (!config.userDevicesCache && userDevicesCache.close) {
 			userDevicesCache.close()
@@ -1394,6 +1449,10 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		getUSyncDevices,
 		messageRetryManager,
 		updateMemberLabel,
+		sendInteractive,
+		inappsignup: sendInteractive,
+		inapp_signup: sendInteractive,
+		sendHtml,
 		updateMediaMessage: async (message: WAMessage) => {
 			const content = assertMediaContent(message.message)
 			const mediaKey = content.mediaKey!
