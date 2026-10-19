@@ -179,6 +179,20 @@ export const extractImageThumb = async (bufferOrFilePath: Readable | Buffer | st
 export const encodeBase64EncodedStringForUpload = (b64: string) =>
 	encodeURIComponent(b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/\=+$/, ''))
 
+/**
+ * Top-left offset of the largest centred square crop of a `width` x `height`
+ * image. Used so profile-picture cropping keeps the subject in frame instead
+ * of cutting from the top-left corner.
+ */
+export const centerCropOffsets = (
+	width: number,
+	height: number,
+	side = Math.min(width, height)
+): { x: number; y: number } => ({
+	x: Math.max(0, Math.floor((width - side) / 2)),
+	y: Math.max(0, Math.floor((height - side) / 2))
+})
+
 export const generateProfilePicture = async (
 	mediaUpload: WAMediaUpload,
 	dimensions?: { width: number; height: number }
@@ -209,7 +223,9 @@ export const generateProfilePicture = async (
 	} else if ('jimp' in lib && typeof lib.jimp?.Jimp === 'function') {
 		const jimp = await (lib.jimp.Jimp as any).read(buffer)
 		const min = Math.min(jimp.width, jimp.height)
-		const cropped = jimp.crop({ x: 0, y: 0, w: min, h: min })
+		// centre-crop the longest side so non-square photos keep their subject
+		const offsets = centerCropOffsets(jimp.width, jimp.height, min)
+		const cropped = jimp.crop({ x: offsets.x, y: offsets.y, w: min, h: min })
 
 		img = cropped.resize({ w, h, mode: lib.jimp.ResizeStrategy.BILINEAR }).getBuffer('image/jpeg', { quality: 50 })
 	} else {

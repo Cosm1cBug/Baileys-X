@@ -6,6 +6,7 @@ import {
 	USyncContactProtocol,
 	USyncDeviceProtocol,
 	USyncDisappearingModeProtocol,
+	USyncPictureProtocol,
 	USyncStatusProtocol,
 	USyncTextStatusProtocol,
 	USyncUsernameProtocol
@@ -135,6 +136,11 @@ export class USyncQuery {
 
 	withUsernameProtocol() {
 		this.protocols.push(new USyncUsernameProtocol())
+		return this
+	}
+
+	withPictureProtocol(type: 'image' | 'preview' = 'image') {
+		this.protocols.push(new USyncPictureProtocol(type))
 		return this
 	}
 

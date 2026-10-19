@@ -122,6 +122,15 @@ type Contextable = {
 	/** add contextInfo to the message */
 	contextInfo?: proto.IContextInfo
 }
+export type GroupStatusMetadata = {
+	/** how the status media was produced */
+	statusSourceType?: proto.ContextInfo.StatusSourceType
+	statusAttributions?: proto.IStatusAttribution[]
+	statusAttributionType?: proto.ContextInfo.StatusAttributionType
+	/** e.g. `{ audienceType: proto.ContextInfo.StatusAudienceMetadata.AudienceType.CLOSE_FRIENDS }` */
+	statusAudienceMetadata?: proto.ContextInfo.IStatusAudienceMetadata
+}
+
 type ViewOnce = {
 	viewOnce?: boolean
 	viewOnceV2?: boolean
@@ -130,8 +139,8 @@ type ViewOnce = {
 	ephemeral?: boolean
 	/** wrap the message in a lottieStickerMessage wrapper */
 	isLottie?: boolean
-	/** mark the message as a group status update */
-	groupStatus?: boolean
+	/** mark the message as a group status update; pass an object to attach status metadata */
+	groupStatus?: boolean | GroupStatusMetadata
 	/** wrap an interactiveMessage in a templateMessage */
 	interactiveAsTemplate?: boolean
 }

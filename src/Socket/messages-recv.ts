@@ -582,6 +582,59 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		await query(stanza)
 	}
 
+	/**
+	 * Accept an incoming call. This is signalling only — the media session
+	 * itself needs a media engine, see CALLING.md.
+	 */
+	const acceptCall = async (callId: string, callFrom: string) => {
+		const stanza: BinaryNode = {
+			tag: 'call',
+			attrs: {
+				from: authState.creds.me!.id,
+				to: callFrom
+			},
+			content: [
+				{
+					tag: 'accept',
+					attrs: {
+						'call-id': callId,
+						'call-creator': callFrom,
+						count: '0'
+					},
+					content: undefined
+				}
+			]
+		}
+		await query(stanza)
+	}
+
+	/**
+	 * Terminate an ongoing call. This is signalling only — the media session
+	 * itself needs a media engine, see CALLING.md.
+	 */
+	const terminateCall = async (callId: string, callFrom: string) => {
+		const stanza: BinaryNode = {
+			tag: 'call',
+			attrs: {
+				from: authState.creds.me!.id,
+				to: callFrom
+			},
+			content: [
+				{
+					tag: 'terminate',
+					attrs: {
+						'call-id': callId,
+						'call-creator': callFrom,
+						reason: 'user-terminated',
+						count: '0'
+					},
+					content: undefined
+				}
+			]
+		}
+		await query(stanza)
+	}
+
 	const sendRetryRequest = async (node: BinaryNode, forceIncludeKeys = false) => {
 		const { fullMessage } = decodeMessageNode(node, authState.creds.me!.id, authState.creds.me!.lid || '')
 		const { key: msgKey } = fullMessage
@@ -2228,6 +2281,8 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		sendMessageAck,
 		sendRetryRequest,
 		rejectCall,
+		acceptCall,
+		terminateCall,
 		fetchMessageHistory,
 		requestPlaceholderResend,
 		messageRetryManager

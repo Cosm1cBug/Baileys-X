@@ -1159,10 +1159,11 @@ export const generateWAMessageContent = async (
 	}
 
 	if (hasOptionalProperty(message, 'groupStatus') && !!message.groupStatus) {
+		const metadata = typeof message.groupStatus === 'object' ? message.groupStatus : undefined
 		const messageType = Object.keys(m)[0] as keyof proto.IMessage
 		const key = m[messageType] as { contextInfo?: proto.IContextInfo } | undefined
 		if (key) {
-			key.contextInfo = { ...key.contextInfo, isGroupStatus: true }
+			key.contextInfo = { ...key.contextInfo, isGroupStatus: true, ...metadata }
 		}
 
 		m = { groupStatusMessageV2: { message: m } }
@@ -1200,8 +1201,10 @@ export const generateWAMessageContent = async (
 		(hasOptionalProperty(message, 'mentions') && message.mentions?.length) ||
 		(hasOptionalProperty(message, 'mentionAll') && message.mentionAll)
 	) {
-		const messageType = Object.keys(m)[0]! as Extract<keyof proto.IMessage, MessageWithContextInfo>
-		const key = m[messageType]
+		// merge into the innermost message so the context survives wrapper layers
+		const inner = normalizeMessageContent(m)!
+		const messageType = Object.keys(inner)[0]! as Extract<keyof proto.IMessage, MessageWithContextInfo>
+		const key = inner[messageType]
 		if (key && 'contextInfo' in key) {
 			key.contextInfo = key.contextInfo || {}
 			if (message.mentions?.length) {
@@ -1231,8 +1234,10 @@ export const generateWAMessageContent = async (
 	}
 
 	if (hasOptionalProperty(message, 'contextInfo') && !!message.contextInfo) {
-		const messageType = Object.keys(m)[0]! as Extract<keyof proto.IMessage, MessageWithContextInfo>
-		const key = m[messageType]
+		// merge into the innermost message so the context survives wrapper layers
+		const inner = normalizeMessageContent(m)!
+		const messageType = Object.keys(inner)[0]! as Extract<keyof proto.IMessage, MessageWithContextInfo>
+		const key = inner[messageType]
 		if ('contextInfo' in key! && !!key.contextInfo) {
 			key.contextInfo = { ...key.contextInfo, ...message.contextInfo }
 		} else if (key!) {

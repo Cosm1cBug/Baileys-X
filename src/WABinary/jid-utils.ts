@@ -126,3 +126,16 @@ export const transferDevice = (fromJid: string, toJid: string) => {
 	const { server, user } = jidDecode(toJid)!
 	return jidEncode(user, server, deviceId)
 }
+
+/**
+ * Extract the clean newsletter (channel) ID from any JID form:
+ * `123@newsletter`, `123:4@newsletter` or a bare `123` all yield `123`.
+ */
+export const newsletterId = (jid: string | null | undefined): string | null => {
+	if (!jid) {
+		return null
+	}
+
+	const user = jid.split('@')[0]?.split(':')[0]?.split('_')[0]
+	return user || null
+}
