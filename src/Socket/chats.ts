@@ -189,6 +189,8 @@ export const makeChatsSocket = (config: SocketConfig) => {
 	} = sock
 
 	const getLIDForPN = signalRepository.lidMapping.getLIDForPN.bind(signalRepository.lidMapping)
+	const getLidForJid = signalRepository.lidMapping.getLidForJid.bind(signalRepository.lidMapping)
+	const getRealJid = signalRepository.lidMapping.getRealJid.bind(signalRepository.lidMapping)
 
 	let privacySettings: { [_: string]: string } | undefined
 
@@ -1582,6 +1584,8 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		appPatch,
 		sendPresenceUpdate,
 		presenceSubscribe,
+		getLidForJid,
+		getRealJid,
 		profilePictureUrl,
 		fetchBlocklist,
 		fetchStatus,
