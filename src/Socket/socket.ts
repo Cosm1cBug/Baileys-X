@@ -454,7 +454,7 @@ export const makeSocket = (config: SocketConfig) => {
 		const keyEnc = noise.processHandshake(handshake, creds.noiseKey)
 
 		let node: proto.IClientPayload
-		if (!creds.me) {
+		if (!creds.me || (!!creds.pairingCode && !creds.registered)) {
 			node = generateRegistrationNode(creds, config)
 			logger.info({ node }, 'not logged in, attempting registration...')
 		} else {
@@ -827,7 +827,7 @@ export const makeSocket = (config: SocketConfig) => {
 							{
 								tag: 'link_code_pairing_nonce',
 								attrs: {},
-								content: '0'
+								content: Buffer.alloc(1)
 							}
 						]
 					}
