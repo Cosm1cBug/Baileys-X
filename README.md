@@ -74,126 +74,144 @@ import makeWASocket from '@whiskeysockets/baileys'
 - [Discord](https://discord.gg/WeJM5FP9GG)
 - [Docs](https://baileys.wiki/docs/intro/)
 
-# Index
+## 📋 Table of Contents
 
-- [Connecting Account](#connecting-account)
-    - [Connect with QR-CODE](#starting-socket-with-qr-code)
-    - [Connect with Pairing Code](#starting-socket-with-pairing-code)
-    - [Receive Full History](#receive-full-history)
-- [Important Notes About Socket Config](#important-notes-about-socket-config)
-    - [Caching Group Metadata (Recommended)](#caching-group-metadata-recommended)
-    - [Improve Retry System & Decrypt Poll Votes](#improve-retry-system--decrypt-poll-votes)
-    - [Receive Notifications in Whatsapp App](#receive-notifications-in-whatsapp-app)
-
-- [Save Auth Info](#saving--restoring-sessions)
-- [Handling Events](#handling-events)
-    - [Example to Start](#example-to-start)
-    - [Decrypt Poll Votes](#decrypt-poll-votes)
-    - [Summary of Events on First Connection](#summary-of-events-on-first-connection)
-- [Implementing a Data Store](#implementing-a-data-store)
-- [Whatsapp IDs Explain](#whatsapp-ids-explain)
-    - [Resolving LID ↔ Phone Number](#resolving-lid--phone-number-getrealjid--getlidforjid)
-- [Utility Functions](#utility-functions)
-- [Sending Messages](#sending-messages)
-    - [Non-Media Messages](#non-media-messages)
-        - [Text Message](#text-message)
-        - [Quote Message](#quote-message-works-with-all-types)
-        - [Mention User](#mention-user-works-with-most-types)
-        - [Forward Messages](#forward-messages)
-        - [Location Message](#location-message)
-        - [Contact Message](#contact-message)
-        - [Reaction Message](#reaction-message)
-        - [Pin Message](#pin-message)
-        - [Poll Message](#poll-message)
-    - [Sending with Link Preview](#sending-messages-with-link-previews)
-    - [Media Messages](#media-messages)
-        - [Gif Message](#gif-message)
-        - [Video Message](#video-message)
-        - [Audio Message](#audio-message)
-        - [Image Message](#image-message)
-        - [ViewOnce Message](#view-once-message)
-    - [Interactive Messages](#interactive-messages)
-    - [Albums](#albums)
-    - [Additional Message Types](#additional-message-types)
-    - [Newsletter (Channel) Messages](#newsletter-channel-messages)
-- [Modify Messages](#modify-messages)
-    - [Delete Messages (for everyone)](#deleting-messages-for-everyone)
-    - [Edit Messages](#editing-messages)
-- [Manipulating Media Messages](#manipulating-media-messages)
-    - [Thumbnail in Media Messages](#thumbnail-in-media-messages)
-    - [Downloading Media Messages](#downloading-media-messages)
-    - [Re-upload Media Message to Whatsapp](#re-upload-media-message-to-whatsapp)
-- [Reject Call](#reject-call)
-- [Voice Calling](#voice-calling)
-- [Send States in Chat](#send-states-in-chat)
-    - [Reading Messages](#reading-messages)
-    - [Update Presence](#update-presence)
-- [Modifying Chats](#modifying-chats)
-    - [Archive a Chat](#archive-a-chat)
-    - [Mute/Unmute a Chat](#muteunmute-a-chat)
-    - [Mark a Chat Read/Unread](#mark-a-chat-readunread)
-    - [Delete a Message for Me](#delete-a-message-for-me)
-    - [Delete a Chat](#delete-a-chat)
-    - [Star/Unstar a Message](#starunstar-a-message)
-    - [Disappearing Messages](#disappearing-messages)
-- [User Querys](#user-querys)
-    - [Check If ID Exists in Whatsapp](#check-if-id-exists-in-whatsapp)
-    - [Query Chat History (groups too)](#query-chat-history-groups-too)
-    - [Fetch Status](#fetch-status)
-    - [Fetch Profile Picture (groups too)](#fetch-profile-picture-groups-too)
-    - [Fetch Bussines Profile (such as description or category)](#fetch-bussines-profile-such-as-description-or-category)
-    - [Fetch Someone's Presence (if they're typing or online)](#fetch-someones-presence-if-theyre-typing-or-online)
-- [Change Profile](#change-profile)
-    - [Change Profile Status](#change-profile-status)
-    - [Change Profile Name](#change-profile-name)
-    - [Change Display Picture (groups too)](#change-display-picture-groups-too)
-    - [Remove display picture (groups too)](#remove-display-picture-groups-too)
-- [Groups](#groups)
-    - [Create a Group](#create-a-group)
-    - [Add/Remove or Demote/Promote](#addremove-or-demotepromote)
-    - [Change Subject (name)](#change-subject-name)
-    - [Change Description](#change-description)
-    - [Change Settings](#change-settings)
-    - [Leave a Group](#leave-a-group)
-    - [Get Invite Code](#get-invite-code)
-    - [Revoke Invite Code](#revoke-invite-code)
-    - [Join Using Invitation Code](#join-using-invitation-code)
-    - [Get Group Info by Invite Code](#get-group-info-by-invite-code)
-    - [Query Metadata (participants, name, description...)](#query-metadata-participants-name-description)
-    - [Join using groupInviteMessage](#join-using-groupinvitemessage)
-    - [Get Request Join List](#get-request-join-list)
-    - [Approve/Reject Request Join](#approvereject-request-join)
-    - [Get All Participating Groups Metadata](#get-all-participating-groups-metadata)
-    - [Toggle Ephemeral](#toggle-ephemeral)
-    - [Change Add Mode](#change-add-mode)
-- [Privacy](#privacy)
-    - [Block/Unblock User](#blockunblock-user)
-    - [Get Privacy Settings](#get-privacy-settings)
-    - [Get BlockList](#get-blocklist)
-    - [Update LastSeen Privacy](#update-lastseen-privacy)
-    - [Update Online Privacy](#update-online-privacy)
-    - [Update Profile Picture Privacy](#update-profile-picture-privacy)
-    - [Update Status Privacy](#update-status-privacy)
-    - [Update Read Receipts Privacy](#update-read-receipts-privacy)
-    - [Update Groups Add Privacy](#update-groups-add-privacy)
-    - [Update Default Disappearing Mode](#update-default-disappearing-mode)
-- [Broadcast Lists & Stories](#broadcast-lists--stories)
-    - [Send Broadcast & Stories](#send-broadcast--stories)
-    - [Mention Chats in a Status](#mention-chats-in-a-status)
-    - [Query a Broadcast List's Recipients & Name](#query-a-broadcast-lists-recipients--name)
-- [Baileys-X Additions](#baileys-x-additions)
-    - [Message Types — Quick Reference](#message-types--quick-reference)
-    - [Username API](#username-api)
-    - [AI Groups](#ai-groups)
-    - [Interop](#interop-third-party-app-interop)
-    - [Rich Responses](#rich-responses--airich-toolkit-sendhtml-sendinteractive)
-    - [Call Signalling](#call-signalling)
-    - [Newsletter Helpers](#newsletter-helpers)
-    - [Socket Config — Full Reference](#socket-config--full-reference)
-- [Writing Custom Functionality](#writing-custom-functionality)
-    - [Enabling Debug Level in Baileys Logs](#enabling-debug-level-in-baileys-logs)
-    - [How Whatsapp Communicate With Us](#how-whatsapp-communicate-with-us)
-    - [Register a Callback for Websocket Events](#register-a-callback-for-websocket-events)
+- [⚠️ Important Note](#important-note)
+- [💬 Get Support](#get-support)
+- [📖 Example](#example)
+- [📥 Install](#install)
+- [🔗 Links](#links)
+- [🌐 Connecting Account](#connecting-account)
+  - [📷 Connect with QR-CODE](#starting-socket-with-qr-code)
+  - [🔑 Connect with Pairing Code](#starting-socket-with-pairing-code)
+  - [🕘 Receive Full History](#receive-full-history)
+- [⚙️ Important Notes About Socket Config](#important-notes-about-socket-config)
+  - [🗄️ Caching Group Metadata (Recommended)](#caching-group-metadata-recommended)
+  - [🔁 Improve Retry System & Decrypt Poll Votes](#improve-retry-system--decrypt-poll-votes)
+  - [🔔 Receive Notifications in Whatsapp App](#receive-notifications-in-whatsapp-app)
+- [💾 Saving & Restoring Sessions](#saving--restoring-sessions)
+- [📡 Handling Events](#handling-events)
+  - [▶️ Example to Start](#example-to-start)
+  - [📊 Decrypt Poll Votes](#decrypt-poll-votes)
+  - [🧭 Summary of Events on First Connection](#summary-of-events-on-first-connection)
+- [🗄️ Implementing a Data Store](#implementing-a-data-store)
+- [🪪 Whatsapp IDs Explain](#whatsapp-ids-explain)
+  - [🔄 Resolving LID ↔ Phone Number (`getRealJid` / `getLidForJid`)](#resolving-lid--phone-number-getrealjid--getlidforjid)
+- [🧰 Utility Functions](#utility-functions)
+- [✉️ Sending Messages](#sending-messages)
+  - [📝 Non-Media Messages](#non-media-messages)
+    - [🔠 Text Message](#text-message)
+    - [💬 Quote Message](#quote-message-works-with-all-types)
+    - [🔔 Mention User](#mention-user-works-with-most-types)
+    - [➡️ Forward Messages](#forward-messages)
+    - [📍 Location Message](#location-message)
+    - [👤 Contact Message](#contact-message)
+    - [😀 Reaction Message](#reaction-message)
+    - [📌 Pin Message](#pin-message)
+    - [📊 Poll Message](#poll-message)
+  - [🔗 Sending Messages with Link Previews](#sending-messages-with-link-previews)
+  - [📁 Media Messages](#media-messages)
+    - [🎞️ Gif Message](#gif-message)
+    - [🎥 Video Message](#video-message)
+    - [🎵 Audio Message](#audio-message)
+    - [🖼️ Image Message](#image-message)
+    - [🏷️ Sticker Message](#sticker-message)
+    - [📄 Document Message](#document-message)
+    - [👁️ View Once Message](#view-once-message)
+  - [👉 Interactive Messages](#interactive-messages)
+    - [🔘 Reply Buttons](#reply-buttons)
+    - [📋 List Message](#list-message)
+    - [🌊 Native Flow Buttons](#native-flow-buttons)
+    - [🧩 Template Buttons](#template-buttons)
+    - [🎠 Carousel](#carousel)
+  - [🖼️ Albums](#albums)
+  - [🧩 Additional Message Types](#additional-message-types)
+    - [🗓️ Event Message](#event-message)
+    - [💳 Payment Messages](#payment-messages)
+    - [📊 Poll Result & Poll Votes](#poll-result--poll-votes)
+    - [🔖 Keep & Flow Reply](#keep--flow-reply)
+    - [🎞️ Status Mention & Group Status](#status-mention--group-status)
+  - [📣 Newsletter (Channel) Messages](#newsletter-channel-messages)
+- [♻️ Modify Messages](#modify-messages)
+  - [🗑️ Deleting Messages (for everyone)](#deleting-messages-for-everyone)
+  - [✏️ Editing Messages](#editing-messages)
+- [🎬 Manipulating Media Messages](#manipulating-media-messages)
+  - [🖼️ Thumbnail in Media Messages](#thumbnail-in-media-messages)
+  - [⬇️ Downloading Media Messages](#downloading-media-messages)
+  - [⬆️ Re-upload Media Message to Whatsapp](#re-upload-media-message-to-whatsapp)
+- [📞 Reject Call](#reject-call)
+- [🎙️ Voice Calling](#voice-calling)
+- [✅ Send States in Chat](#send-states-in-chat)
+  - [📖 Reading Messages](#reading-messages)
+  - [🟢 Update Presence](#update-presence)
+- [💬 Modifying Chats](#modifying-chats)
+  - [📥 Archive a Chat](#archive-a-chat)
+  - [🔕 Mute/Unmute a Chat](#muteunmute-a-chat)
+  - [📖 Mark a Chat Read/Unread](#mark-a-chat-readunread)
+  - [🗑️ Delete a Message for Me](#delete-a-message-for-me)
+  - [🧹 Delete a Chat](#delete-a-chat)
+  - [📌 Pin/Unpin a Chat](#pinunpin-a-chat)
+  - [⭐ Star/Unstar a Message](#starunstar-a-message)
+  - [⏱️ Disappearing Messages](#disappearing-messages)
+- [🔍 User Querys](#user-querys)
+  - [✔️ Check If ID Exists in Whatsapp](#check-if-id-exists-in-whatsapp)
+  - [🕘 Query Chat History (groups too)](#query-chat-history-groups-too)
+  - [💬 Fetch Status](#fetch-status)
+  - [🖼️ Fetch Profile Picture (groups too)](#fetch-profile-picture-groups-too)
+  - [🏢 Fetch Bussines Profile](#fetch-bussines-profile-such-as-description-or-category)
+  - [👀 Fetch Someone's Presence](#fetch-someones-presence-if-theyre-typing-or-online)
+- [👤 Change Profile](#change-profile)
+  - [💬 Change Profile Status](#change-profile-status)
+  - [✏️ Change Profile Name](#change-profile-name)
+  - [🖼️ Change Display Picture (groups too)](#change-display-picture-groups-too)
+  - [🗑️ Remove display picture (groups too)](#remove-display-picture-groups-too)
+- [👥 Groups](#groups)
+  - [➕ Create a Group](#create-a-group)
+  - [👥 Add/Remove or Demote/Promote](#addremove-or-demotepromote)
+  - [✏️ Change Subject (name)](#change-subject-name)
+  - [📝 Change Description](#change-description)
+  - [⚙️ Change Settings](#change-settings)
+  - [🚪 Leave a Group](#leave-a-group)
+  - [🔗 Get Invite Code](#get-invite-code)
+  - [♻️ Revoke Invite Code](#revoke-invite-code)
+  - [🔑 Join Using Invitation Code](#join-using-invitation-code)
+  - [ℹ️ Get Group Info by Invite Code](#get-group-info-by-invite-code)
+  - [📋 Query Metadata](#query-metadata-participants-name-description)
+  - [✉️ Join using `groupInviteMessage`](#join-using-groupinvitemessage)
+  - [📥 Get Request Join List](#get-request-join-list)
+  - [✅ Approve/Reject Request Join](#approvereject-request-join)
+  - [👥 Get All Participating Groups Metadata](#get-all-participating-groups-metadata)
+  - [⏱️ Toggle Ephemeral](#toggle-ephemeral)
+  - [➕ Change Add Mode](#change-add-mode)
+- [🔐 Privacy](#privacy)
+  - [🚫 Block/Unblock User](#blockunblock-user)
+  - [⚙️ Get Privacy Settings](#get-privacy-settings)
+  - [📋 Get BlockList](#get-blocklist)
+  - [👀 Update LastSeen Privacy](#update-lastseen-privacy)
+  - [🟢 Update Online Privacy](#update-online-privacy)
+  - [🖼️ Update Profile Picture Privacy](#update-profile-picture-privacy)
+  - [💬 Update Status Privacy](#update-status-privacy)
+  - [🧾 Update Read Receipts Privacy](#update-read-receipts-privacy)
+  - [👥 Update Groups Add Privacy](#update-groups-add-privacy)
+  - [⏱️ Update Default Disappearing Mode](#update-default-disappearing-mode)
+- [📢 Broadcast Lists & Stories](#broadcast-lists--stories)
+  - [📣 Send Broadcast & Stories](#send-broadcast--stories)
+  - [🔔 Mention Chats in a Status](#mention-chats-in-a-status)
+  - [📋 Query a Broadcast List's Recipients & Name](#query-a-broadcast-lists-recipients--name)
+- [✨ Baileys-X Additions](#baileys-x-additions)
+  - [📨 Message Types — Quick Reference](#message-types--quick-reference)
+  - [🆔 Username API](#username-api)
+  - [🤖 AI Groups](#ai-groups)
+  - [🔌 Interop (third-party app interop)](#interop-third-party-app-interop)
+  - [✨ Rich Responses — `AIRich`, `Toolkit`, `sendHtml`, `sendInteractive`](#rich-responses--airich-toolkit-sendhtml-sendinteractive)
+  - [📞 Call Signalling](#call-signalling)
+  - [📣 Newsletter Helpers](#newsletter-helpers)
+  - [⚙️ Socket Config — Full Reference](#socket-config--full-reference)
+- [🛠️ Writing Custom Functionality](#writing-custom-functionality)
+  - [🐛 Enabling Debug Level in Baileys Logs](#enabling-debug-level-in-baileys-logs)
+  - [📡 How Whatsapp Communicate With Us](#how-whatsapp-communicate-with-us)
+  - [🔌 Register a Callback for Websocket Events](#register-a-callback-for-websocket-events)
+- [📄 License](#license)
 
 ## Connecting Account
 
@@ -734,6 +752,35 @@ await sock.sendMessage(
 )
 ```
 
+#### Sticker Message
+```ts
+await sock.sendMessage(
+    jid,
+    {
+        sticker: {
+            url: './Media/sticker.webp'
+        }
+    }
+)
+// animated / lottie stickers:
+await sock.sendMessage(jid, { sticker: { url: './sticker.json' }, isLottie: true })
+```
+
+#### Document Message
+```ts
+await sock.sendMessage(
+    jid,
+    {
+        document: {
+            url: './Media/report.pdf'
+        },
+        fileName: 'report.pdf',
+        mimetype: 'application/pdf',
+        caption: 'quarterly report'
+    }
+)
+```
+
 #### View Once Message
 
 - You can send all messages above as `viewOnce`, you only need to pass `viewOnce: true` in content object
@@ -868,6 +915,90 @@ The following contents are supported through `sendMessage`:
 | `externalAdReply: { ... }` | External ad reply attached to text or media |
 | `raw: WAMessageContent` | Send a hand-built protobuf message, bypassing the builders |
 | `secureMetaServiceLabel: true` | Force the `biz` node on the stanza (WA Web's secure Meta service label) |
+
+#### Event Message
+
+```ts
+await sock.sendMessage(jid, {
+    event: {
+        name: 'Baileys-X Meetup',
+        description: 'Monthly catch-up',
+        startDate: new Date('2026-11-01T18:00:00Z'),
+        endDate: new Date('2026-11-01T19:00:00Z'),
+        extraGuestsAllowed: true
+    }
+})
+```
+
+#### Payment Messages
+
+```ts
+import { proto } from '@whiskeysockets/baileys'
+
+// invite the chat to pay via a payment service
+await sock.sendMessage(jid, {
+    paymentInviteServiceType: proto.Message.PaymentInviteMessage.ServiceType.UPI
+})
+
+// request a payment (amount1000 = amount × 1000)
+await sock.sendMessage(jid, {
+    requestPaymentFrom: jid,
+    amount1000: 5000,
+    currencyCodeIso4217: 'USD',
+    text: 'Please pay for lunch'
+})
+
+// invoice note attached to an image or document receipt
+await sock.sendMessage(jid, {
+    invoiceNote: 'Invoice #42',
+    image: { url: './receipt.png' }
+})
+```
+
+#### Poll Result & Poll Votes
+
+```ts
+// publish a result snapshot for a poll
+await sock.sendMessage(jid, {
+    pollResult: {
+        name: 'Lunch?',
+        votes: [
+            { name: 'Pizza', voteCount: 3 },
+            { name: 'Sushi', voteCount: 1 }
+        ]
+    }
+})
+
+// vote on an existing poll (vote = IPollEncValue from the poll's vote handling)
+await sock.sendMessage(jid, { pollUpdate: { key: pollKey, vote } })
+```
+
+#### Keep & Flow Reply
+
+```ts
+import { proto } from '@whiskeysockets/baileys'
+
+// keep a message in the chat (KeepType.UNDO to unkeep)
+await sock.sendMessage(jid, { keep: msg.key, type: proto.KeepType.KEEP_FOR_ALL })
+
+// reply to a WhatsApp Flow
+await sock.sendMessage(jid, {
+    flowReply: { text: 'Done', name: 'booking_flow', paramsJson: '{}' }
+})
+```
+
+#### Status Mention & Group Status
+
+```ts
+// an ARRAY of JIDs publishes a status and mentions each chat in a follow-up message
+await sock.sendMessage(['19999999999@s.whatsapp.net', groupJid], {
+    image: { url: './status.png' },
+    caption: 'mentioning you'
+})
+
+// post a group status inside a group chat
+await sock.sendMessage(groupJid, { text: 'group announcement', groupStatus: true })
+```
 
 Message wrappers can be requested for any supported content:
 
