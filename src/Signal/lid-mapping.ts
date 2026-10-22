@@ -1,7 +1,15 @@
 import { LRUCache } from 'lru-cache'
 import type { LIDMapping, SignalKeyStoreWithTransaction } from '../Types'
 import type { ILogger } from '../Utils/logger'
-import { isHostedPnUser, isLidUser, isPnUser, jidDecode, jidNormalizedUser, WAJIDDomains } from '../WABinary'
+import {
+	isHostedLidUser,
+	isHostedPnUser,
+	isLidUser,
+	isPnUser,
+	jidDecode,
+	jidNormalizedUser,
+	WAJIDDomains
+} from '../WABinary'
 
 export class LIDMappingStore {
 	private readonly mappingCache = new LRUCache<string, string>({
@@ -242,6 +250,54 @@ export class LIDMappingStore {
 
 	async getPNForLID(lid: string): Promise<string | null> {
 		return (await this.getPNsForLIDs([lid]))?.[0]?.pn || null
+	}
+
+	/**
+	 * Resolve any user JID to its LID JID.
+	 *
+	 * - A LID JID (`@lid` / `@hosted.lid`) is returned normalized, unchanged.
+	 * - A phone-number JID (`@s.whatsapp.net` / `@hosted`) is resolved through the
+	 *   LID mapping store (cache → persisted mappings → USync fetch).
+	 * - Anything else (groups, newsletters, broadcasts, invalid input) yields `null`.
+	 */
+	async getLidForJid(jid: string): Promise<string | null> {
+		if (!jid || typeof jid !== 'string') return null
+
+		const normalized = jidNormalizedUser(jid)
+		if (isLidUser(normalized) || isHostedLidUser(normalized)) {
+			return normalized
+		}
+
+		if (!isPnUser(normalized) && !isHostedPnUser(normalized)) {
+			return null
+		}
+
+		const lid = await this.getLIDForPN(normalized)
+		return lid ? jidNormalizedUser(lid) : null
+	}
+
+	/**
+	 * Resolve any user JID to its "real" (phone-number) JID.
+	 *
+	 * - A phone-number JID (`@s.whatsapp.net` / `@hosted`) is returned normalized, unchanged.
+	 * - A LID JID (`@lid` / `@hosted.lid`) is resolved through the LID mapping store
+	 *   (cache → persisted mappings → USync fetch).
+	 * - Anything else (groups, newsletters, broadcasts, invalid input) yields `null`.
+	 */
+	async getRealJid(jid: string): Promise<string | null> {
+		if (!jid || typeof jid !== 'string') return null
+
+		const normalized = jidNormalizedUser(jid)
+		if (isPnUser(normalized) || isHostedPnUser(normalized)) {
+			return normalized
+		}
+
+		if (!isLidUser(normalized) && !isHostedLidUser(normalized)) {
+			return null
+		}
+
+		const pn = await this.getPNForLID(normalized)
+		return pn ? jidNormalizedUser(pn) : null
 	}
 
 	async getPNsForLIDs(lids: string[]): Promise<LIDMapping[] | null> {

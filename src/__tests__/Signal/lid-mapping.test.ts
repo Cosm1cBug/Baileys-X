@@ -45,4 +45,79 @@ describe('LIDMappingStore', () => {
 			expect(result).toBeNull()
 		})
 	})
+
+	describe('getLidForJid', () => {
+		it('returns a LID JID unchanged (normalized) without hitting the store', async () => {
+			const result = await lidMappingStore.getLidForJid('12345:2@lid')
+			expect(result).toBe('12345@lid')
+			expect(mockKeys.get).not.toHaveBeenCalled()
+		})
+
+		it('resolves a phone-number JID to its LID via persisted mappings', async () => {
+			// @ts-ignore
+			mockKeys.get.mockResolvedValue({ '54321': '99999' } as SignalDataTypeMap['lid-mapping'])
+
+			const result = await lidMappingStore.getLidForJid('54321@s.whatsapp.net')
+			expect(result).toBe('99999@lid')
+		})
+
+		it('returns null when no LID mapping exists', async () => {
+			// @ts-ignore
+			mockKeys.get.mockResolvedValue({} as SignalDataTypeMap['lid-mapping'])
+			mockPnToLIDFunc.mockResolvedValue(undefined)
+
+			const result = await lidMappingStore.getLidForJid('10000@s.whatsapp.net')
+			expect(result).toBeNull()
+		})
+
+		it('returns null for non-user JIDs and invalid input', async () => {
+			expect(await lidMappingStore.getLidForJid('12345-6789@g.us')).toBeNull()
+			expect(await lidMappingStore.getLidForJid('status@broadcast')).toBeNull()
+			expect(await lidMappingStore.getLidForJid('12345@newsletter')).toBeNull()
+			expect(await lidMappingStore.getLidForJid('')).toBeNull()
+		})
+	})
+
+	describe('getRealJid', () => {
+		it('returns a phone-number JID unchanged (normalized) without hitting the store', async () => {
+			const result = await lidMappingStore.getRealJid('54321:4@s.whatsapp.net')
+			expect(result).toBe('54321@s.whatsapp.net')
+			expect(mockKeys.get).not.toHaveBeenCalled()
+		})
+
+		it('resolves a LID JID to its phone-number JID via persisted mappings', async () => {
+			// @ts-ignore
+			mockKeys.get.mockResolvedValue({ '99999_reverse': '54321' } as SignalDataTypeMap['lid-mapping'])
+
+			const result = await lidMappingStore.getRealJid('99999@lid')
+			expect(result).toBe('54321@s.whatsapp.net')
+		})
+
+		it('returns null when no PN mapping exists', async () => {
+			// @ts-ignore
+			mockKeys.get.mockResolvedValue({} as SignalDataTypeMap['lid-mapping'])
+
+			const result = await lidMappingStore.getRealJid('424242@lid')
+			expect(result).toBeNull()
+		})
+
+		it('returns null for non-user JIDs and invalid input', async () => {
+			expect(await lidMappingStore.getRealJid('12345-6789@g.us')).toBeNull()
+			expect(await lidMappingStore.getRealJid('status@broadcast')).toBeNull()
+			expect(await lidMappingStore.getRealJid('12345@newsletter')).toBeNull()
+			expect(await lidMappingStore.getRealJid('')).toBeNull()
+		})
+
+		it('round-trips: getRealJid(getLidForJid(pn)) returns the PN', async () => {
+			// @ts-ignore
+			mockKeys.get.mockResolvedValue({
+				'54321': '99999',
+				'99999_reverse': '54321'
+			} as SignalDataTypeMap['lid-mapping'])
+
+			const lid = await lidMappingStore.getLidForJid('54321@s.whatsapp.net')
+			expect(lid).toBe('99999@lid')
+			expect(await lidMappingStore.getRealJid(lid!)).toBe('54321@s.whatsapp.net')
+		})
+	})
 })

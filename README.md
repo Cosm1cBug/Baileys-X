@@ -92,6 +92,7 @@ import makeWASocket from '@whiskeysockets/baileys'
     - [Summary of Events on First Connection](#summary-of-events-on-first-connection)
 - [Implementing a Data Store](#implementing-a-data-store)
 - [Whatsapp IDs Explain](#whatsapp-ids-explain)
+    - [Resolving LID ↔ Phone Number](#resolving-lid--phone-number-getrealjid--getlidforjid)
 - [Utility Functions](#utility-functions)
 - [Sending Messages](#sending-messages)
     - [Non-Media Messages](#non-media-messages)
@@ -180,6 +181,15 @@ import makeWASocket from '@whiskeysockets/baileys'
     - [Send Broadcast & Stories](#send-broadcast--stories)
     - [Mention Chats in a Status](#mention-chats-in-a-status)
     - [Query a Broadcast List's Recipients & Name](#query-a-broadcast-lists-recipients--name)
+- [Baileys-X Additions](#baileys-x-additions)
+    - [Message Types — Quick Reference](#message-types--quick-reference)
+    - [Username API](#username-api)
+    - [AI Groups](#ai-groups)
+    - [Interop](#interop-third-party-app-interop)
+    - [Rich Responses](#rich-responses--airich-toolkit-sendhtml-sendinteractive)
+    - [Call Signalling](#call-signalling)
+    - [Newsletter Helpers](#newsletter-helpers)
+    - [Socket Config — Full Reference](#socket-config--full-reference)
 - [Writing Custom Functionality](#writing-custom-functionality)
     - [Enabling Debug Level in Baileys Logs](#enabling-debug-level-in-baileys-logs)
     - [How Whatsapp Communicate With Us](#how-whatsapp-communicate-with-us)
@@ -461,6 +471,38 @@ The store also provides some simple functions such as `loadMessages` that utiliz
 	    - For groups, it must be in the format ``` 123456789-123345@g.us ```.
     - For broadcast lists, it's `[timestamp of creation]@broadcast`.
     - For stories, the ID is `status@broadcast`.
+    - With LID addressing, a person may also appear as `[lid]@lid` (or `[lid]@hosted.lid`)
+      instead of their phone-number JID. Use the helpers below to convert between the two.
+
+### Resolving LID ↔ Phone Number (`getRealJid` / `getLidForJid`)
+
+Baileys-X exposes the LID mapping store as two socket helpers. Both accept any user JID
+(with or without a device suffix, e.g. `12345:2@lid`), return a normalized user JID, and
+return `null` when no mapping exists or the input is not a user JID (group, newsletter,
+broadcast, invalid input). Lookups consult the in-memory cache first, then persisted
+mappings, then a USync fetch — so a first lookup for an unknown contact may hit the network.
+
+```ts
+// Who is this @lid sender, really?
+const real = await sock.getRealJid('123456789012345@lid')
+console.log(real) // '19999999999@s.whatsapp.net', or null if unknown
+
+// Already a phone-number JID? Returned normalized, unchanged:
+await sock.getRealJid('19999999999:4@s.whatsapp.net') // '19999999999@s.whatsapp.net'
+
+// The reverse direction — get the LID for a phone-number JID:
+const lid = await sock.getLidForJid('19999999999@s.whatsapp.net')
+console.log(lid) // '123456789012345@lid', or null if unknown
+
+// Typical use in a message handler: normalize any sender to a phone-number JID
+sock.ev.on('messages.upsert', async ({ messages }) => {
+    for (const m of messages) {
+        const sender = m.key.participant ?? m.key.remoteJid
+        const phoneJid = sender ? await sock.getRealJid(sender) : null
+        console.log('sender (PN):', phoneJid ?? sender)
+    }
+})
+```
 
 ## Utility Functions
 
@@ -468,6 +510,8 @@ The store also provides some simple functions such as `loadMessages` that utiliz
 - `getDevice`, returns the device from message
 - `makeCacheableSignalKeyStore`, make auth store more fast
 - `downloadContentFromMessage`, download content from any message
+- `sock.getRealJid` / `sock.getLidForJid`, resolve between LID and phone-number JIDs (see above)
+- `newsletterId`, extract the numeric id from a newsletter JID
 
 ## Sending Messages
 
@@ -1387,6 +1431,219 @@ await sock.sendMessage(
 const bList = await sock.getBroadcastListInfo('1234@broadcast')
 console.log (`list name: ${bList.name}, recps: ${bList.recipients}`)
 ```
+
+## Baileys-X Additions
+
+Everything in this section is Baileys-X functionality on top of upstream Baileys.
+All of it is typed, covered by the test suite, and available on the normal socket
+returned by `makeWASocket` — no extra imports beyond what each example shows.
+
+### Message Types — Quick Reference
+
+Every content type accepted by `sock.sendMessage(jid, content, options)`, with a
+minimal example. Types marked † are Baileys-X additions; the rest are documented in
+detail in the sections above.
+
+| Content | Example |
+|---|---|
+| Text | `{ text: 'hello' }` |
+| Image | `{ image: { url: './a.jpg' }, caption: 'hi' }` |
+| Video | `{ video: { url: './a.mp4' }, caption: 'hi' }` |
+| GIF | `{ video: { url: './a.mp4' }, gifPlayback: true }` |
+| Audio / voice note | `{ audio: { url: './a.mp3' }, ptt: true }` |
+| Document | `{ document: { url: './a.pdf' }, fileName: 'a.pdf' }` |
+| Sticker | `{ sticker: { url: './a.webp' } }` |
+| Location | `{ location: { degreesLatitude: 1.23, degreesLongitude: 4.56 } }` |
+| Contact | `{ contacts: { displayName: 'Ada', contacts: [{ vcard }] } }` |
+| Reaction | `{ react: { text: '❤️', key: msg.key } }` |
+| Pin | `{ pin: { type: 1, time: 86400, key: msg.key } }` |
+| Poll | `{ poll: { name: 'Lunch?', values: ['A', 'B'], selectableCount: 1 } }` |
+| Event | `{ event: { name: 'Meetup', startDate: new Date() } }` |
+| Album † | `{ album: [{ image: { url: './1.jpg' } }, { image: { url: './2.jpg' } }] }` |
+| Buttons / list / Native Flow / carousel † | `{ text: 'Pick', nativeFlow: [{ id: 'a', text: 'A' }] }` (see Interactive Messages) |
+| Product / order / payment † | `{ orderText: 'Order', itemCount: 2, thumbnail: imgBuffer }`, `{ requestPaymentFrom: jid, amount1000: 5000, currencyCodeIso4217: 'USD', text: 'Please pay' }` |
+| Poll result / vote † | `{ pollResult: { name: 'Lunch?', votes: [{ name: 'A', voteCount: 3 }] } }`, `{ pollUpdate: { key, vote } }` |
+| Group status † | `{ text: 'group update', groupStatus: true }` |
+| Status mention † | `sock.sendMessage([jid1, jid2], { image: { url: './a.jpg' } })` — an **array** of JIDs publishes a status and mentions each chat in a follow-up message |
+| View-once wrappers † | `{ image: { url: './a.jpg' }, viewOnce: true }` |
+| Forward / delete / edit | `{ forward: msg }`, `{ delete: msg.key }`, `{ text: 'fixed', edit: msg.key }` |
+| Raw protobuf † | `{ raw: { conversation: 'hand-built' } }` — bypasses the builders |
+| Rich / HTML † | via `AIRich` / `sock.sendHtml` — see Rich Responses below |
+
+Common `options` for every send: `{ quoted: msg }`, `{ ephemeralExpiration: 86400 }`,
+`{ statusJidList: [...] }` (status audience), `{ delayMs: 1500 }` (albums/status batches).
+
+### Username API
+
+WhatsApp Username API
+
+WhatsApp usernames (as opposed to phone-number JIDs), via MEX GraphQL queries:
+
+```ts
+// Is a username available? Suggestions come back when it isn't.
+const check = await sock.checkUsername('cosmic_bug')
+console.log(check.available, check.suggestions)
+
+// Claim / release your own username
+await sock.setUsername('cosmic_bug')
+await sock.setUsernamePin('123456')
+console.log(await sock.getMyUsername())
+await sock.deleteUsername()
+
+// Look users up by username, and fetch usernames for known JIDs
+const found = await sock.findUserByUsername('cosmic_bug') // { jid, contact } | null
+const names = await sock.fetchContactUsernames('19999999999@s.whatsapp.net')
+```
+
+### AI Groups
+
+Create and manage groups that include the Meta AI bot
+(default bot `867051314767696@bot`):
+
+```ts
+const group = await sock.aiGroupCreate('Study Group', ['19999999999@s.whatsapp.net'])
+await sock.aiGroupAddBot(group.id)
+await sock.aiGroupParticipantsUpdate(group.id, ['18888888888@s.whatsapp.net'], 'add')
+await sock.aiGroupUpdateSubject(group.id, 'Study Group 📚')
+const code = await sock.aiGroupInviteCode(group.id)
+console.log(await sock.aiGroupMetadata(group.id))
+await sock.aiGroupLeave(group.id)
+```
+
+### Interop (third-party app interop)
+
+Manage interoperability with external apps (BirdyChat, Haiket) and report
+cross-app spam:
+
+```ts
+await sock.initInterop()                       // fetch integrators + opt-in state
+const integrators = await sock.fetchIntegrators()
+await sock.optInIntegrators()                  // default: BirdyChat + Haiket
+const user = await sock.resolveInteropUser('external-id', 12) // BirdyChat = 12
+await sock.reportInteropSpam('1234567890@interop')            // default flow shown
+await sock.trustInteropContact('1234567890@interop')
+await sock.updateInteropBlockStatus('1234567890@interop', 'block')
+```
+
+### Rich Responses — `AIRich`, `Toolkit`, `sendHtml`, `sendInteractive`
+
+Build Meta AI-style rich responses (headings, tables, code with syntax
+highlighting, LaTeX, inline links/entities) and send HTML content:
+
+```ts
+import { AIRich, Toolkit } from '@whiskeysockets/baileys'
+
+const rich = new AIRich()
+    .setTitle('Daily Report')
+    .addText('Hello **world**, see [docs](<https://example.com>)')
+    .addTable([['Name', 'Score'], ['Ada', '42']])
+    .addCode('ts', 'const x: number = 1')
+    .setFooter('generated by Baileys-X')
+await rich.send(sock, jid)
+
+// Raw HTML rendered through the rich-response HTML primitive (unofficial —
+// rendering depends on the recipient's client):
+await sock.sendHtml(jid, '<h1>Hello</h1><p>from Baileys-X</p>')
+
+// Native-flow "in-app signup" style message (falls back to plain text on iOS):
+await sock.sendInteractive(jid, 'Tap to continue', { title: 'Welcome' })
+
+// Toolkit exposes the inline-entity extractor used by the builder:
+const entities = Toolkit.extractIE('Hello **world**')
+```
+
+### Call Signalling
+
+Accept or terminate incoming calls (signalling only — media needs an external
+engine, see [CALLING.md](./CALLING.md)):
+
+```ts
+sock.ev.on('call', async ([call]) => {
+    if (call.status === 'offer') {
+        await sock.acceptCall(call.id, call.from)
+        // ... hand media to your engine ...
+        await sock.terminateCall(call.id, call.from)
+    }
+})
+await sock.rejectCall(callId, callFrom) // decline instead (see Reject Call above)
+```
+
+### Newsletter Helpers
+
+```ts
+import { newsletterId } from '@whiskeysockets/baileys'
+
+newsletterId('12345678901234567890@newsletter') // '12345678901234567890'
+newsletterId('not-a-channel@g.us')              // null
+```
+
+### Socket Config — Full Reference
+
+Every `makeWASocket` option, with its default. Only `auth` is effectively
+required; everything else can be omitted.
+
+```ts
+import makeWASocket, { Browsers, makeCacheableSignalKeyStore } from '@whiskeysockets/baileys'
+
+const sock = makeWASocket({
+    // --- connection ---
+    version: [2, 3000, 1049974625],        // WA Web version tuple (pinned by the repo)
+    browser: Browsers.macOS('Chrome'),     // client identity presented to WA
+    waWebSocketUrl: 'wss://web.whatsapp.com/ws/chat',
+    connectTimeoutMs: 20_000,              // fail connect after 20s
+    keepAliveIntervalMs: 30_000,           // WS ping-pong interval
+    defaultQueryTimeoutMs: 60_000,         // per-query timeout (undefined = none)
+    qrTimeout: undefined,                  // ms to wait for next QR
+
+    // --- auth (required) ---
+    auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger)
+    },
+
+    // --- behaviour ---
+    markOnlineOnConnect: true,             // send 'available' presence on connect
+    syncFullHistory: true,                 // request full history sync
+    fireInitQueries: true,                 // run init queries automatically
+    emitOwnEvents: true,                   // emit events for your own actions
+    countryCode: 'US',                     // for number formatting
+    generateHighQualityLinkPreview: false, // upload HQ link-preview thumbnails
+    linkPreviewImageThumbnailWidth: 192,
+    enableAutoSessionRecreation: true,     // recreate Signal sessions on failure
+    enableRecentMessageCache: true,        // cache recent messages for retries
+
+    // --- retries & timeouts ---
+    maxMsgRetryCount: 5,
+    retryRequestDelayMs: 250,
+    transactionOpts: { maxCommitRetries: 10, delayBetweenTriesMs: 3000 },
+    mediaUploadTimeoutMs: undefined,       // per-send option also available
+
+    // --- hooks (all optional) ---
+    getMessage: async key => undefined,            // your store lookup for retries
+    cachedGroupMetadata: async jid => undefined,   // your group-metadata cache
+    shouldSyncHistoryMessage: () => true,          // filter history-sync downloads
+    shouldIgnoreJid: jid => false,                 // drop events for a JID entirely
+    patchMessageBeforeSending: msg => msg,         // last-chance message mutation
+
+    // --- networking ---
+    agent: undefined,                      // proxy agent for WS
+    fetchAgent: undefined,                 // proxy agent for media HTTP
+    options: {},                           // extra fetch RequestInit
+    customUploadHosts: [],                 // override media upload hosts
+
+    // --- caches (optional; in-memory defaults are used otherwise) ---
+    mediaCache: undefined,
+    msgRetryCounterCache: undefined,
+    userDevicesCache: undefined,
+    callOfferCache: undefined,
+    placeholderResendCache: undefined,
+
+    logger // pino logger
+})
+```
+
+Deprecated/no-op options kept for compatibility: `mobile`, `printQRInTerminal`
+(handle the `qr` field of `connection.update` yourself).
 
 ## Writing Custom Functionality
 Baileys is written with custom functionality in mind. Instead of forking the project & re-writing the internals, you can simply write your own extensions.
