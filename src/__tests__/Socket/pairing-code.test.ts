@@ -225,6 +225,77 @@ describe('requestPairingCode', () => {
 		await sock.end(new Error('test complete'))
 	})
 
+	it('sends a null byte (not the character "0") as the pairing nonce', async () => {
+		const auth = makeAuthState()
+		const logger = makeLogger()
+		const sock = makeSocket(auth, logger)
+		const ws = mockSockets[0]!
+
+		const codePromise = sock.requestPairingCode('1234567890')
+		codePromise.catch(() => undefined)
+		ws.emit('CB:iq,type:set,pair-device', pairDeviceStanza())
+
+		const xml = await getPairingRequestXml(logger)
+		expect(xml).toContain('link_code_pairing_nonce')
+		// WA Web sends Uint8Array([0x00]) — rendered as hex "00" in the node dump.
+		// The ASCII character '0' (0x30) would render as a lone "0" and is rejected by the phone.
+		expect(xml).toMatch(/<link_code_pairing_nonce[^>]*>\s*\n\s*00\s*\n/)
+
+		await sock.end(new Error('test complete'))
+		await codePromise.catch(() => undefined)
+	})
+
+	it('ignores the early link_code_companion_reg notification that has no stage', async () => {
+		const auth = makeAuthState()
+		const logger = makeLogger()
+		const sock = makeSocket(auth, logger)
+		const ws = mockSockets[0]!
+
+		const codePromise = sock.requestPairingCode('1234567890')
+		ws.emit('CB:iq,type:set,pair-device', pairDeviceStanza())
+		const xml = await getPairingRequestXml(logger)
+		const id = getStanzaId(xml)
+		ws.emit(`TAG:${id}`, {
+			tag: 'iq',
+			attrs: { from: '@s.whatsapp.net', id, type: 'result' }
+		} satisfies BinaryNode)
+		await codePromise
+
+		// The server sends this notification immediately after companion_hello:
+		// no stage attr and only link_code_pairing_ref. Processing it would throw
+		// on the missing crypto fields and companion_finish would never be sent.
+		ws.emit('CB:notification', {
+			tag: 'notification',
+			attrs: { from: 's.whatsapp.net', id: 'notif-1', t: '1234567890', type: 'link_code_companion_reg' },
+			content: [
+				{
+					tag: 'link_code_companion_reg',
+					attrs: {},
+					content: [{ tag: 'link_code_pairing_ref', attrs: {}, content: Buffer.from('pair-ref') }]
+				}
+			]
+		} satisfies BinaryNode)
+		await flushPromises()
+		await flushPromises()
+
+		expect(auth.creds.registered).toBeFalsy()
+		expect(
+			logger.trace.mock.calls.some(
+				([entry]) =>
+					typeof entry === 'object' &&
+					entry !== null &&
+					'xml' in entry &&
+					typeof entry.xml === 'string' &&
+					entry.xml.includes('companion_finish')
+			)
+		).toBe(false)
+		// Without the stage guard, reading the missing crypto fields throws and the
+		// error surfaces through onUnexpectedError -> logger.error.
+		expect(logger.error.mock.calls).toHaveLength(0)
+
+		await sock.end(new Error('test complete'))
+	})
+
 	it('rejects concurrent pairing requests', async () => {
 		const auth = makeAuthState()
 		const logger = makeLogger()
