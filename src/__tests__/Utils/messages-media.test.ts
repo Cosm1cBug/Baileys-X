@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals'
 import { createCipheriv, hkdfSync, randomBytes } from 'crypto'
 import * as fs from 'fs'
 import * as http from 'http'
@@ -14,6 +15,7 @@ import {
 	downloadEncryptedContent,
 	encryptedStream,
 	encryptMediaRetryRequest,
+	getHttpStream,
 	getWAUploadToServer,
 	setNewsletterMediaHandle,
 	takeNewsletterMediaHandle,
@@ -657,6 +659,80 @@ describe('media retry key', () => {
 			aesDecryptGCM(encP.content, retryKey, encIv.content, Buffer.from(msgId))
 		)
 		expect(receipt.stanzaId).toBe(msgId)
+	})
+})
+
+describe('getHttpStream', () => {
+	const originalFetch = globalThis.fetch
+
+	afterEach(() => {
+		globalThis.fetch = originalFetch
+	})
+
+	const fakeResponse = (body: Readable, headers: Record<string, string> = {}) =>
+		({
+			ok: true,
+			status: 200,
+			headers: new Headers(headers),
+			body
+		}) as unknown as Response
+
+	it('streams a body under the cap', async () => {
+		globalThis.fetch = jest.fn(async () => fakeResponse(Readable.from([Buffer.from('hello '), Buffer.from('world')])))
+
+		const stream = await getHttpStream('https://example.com/a.jpg', { maxContentLength: 100 })
+		await expect(toBuffer(stream)).resolves.toEqual(Buffer.from('hello world'))
+	})
+
+	it('rejects before streaming when content-length exceeds the cap', async () => {
+		globalThis.fetch = jest.fn(async () =>
+			fakeResponse(Readable.from([Buffer.from('x')]), { 'content-length': '2048' })
+		)
+
+		await expect(getHttpStream('https://example.com/big.jpg', { maxContentLength: 1024 })).rejects.toMatchObject({
+			output: { statusCode: 413 }
+		})
+	})
+
+	it('aborts a chunked body that exceeds the cap mid-stream', async () => {
+		globalThis.fetch = jest.fn(async () =>
+			fakeResponse(Readable.from([Buffer.alloc(600), Buffer.alloc(600), Buffer.alloc(600)]))
+		)
+
+		const stream = await getHttpStream('https://example.com/chunked.jpg', { maxContentLength: 1024 })
+		await expect(toBuffer(stream)).rejects.toMatchObject({ output: { statusCode: 413 } })
+	})
+
+	it('times out waiting for response headers', async () => {
+		globalThis.fetch = jest.fn((async (_url: RequestInfo | URL, init?: RequestInit) =>
+			new Promise<Response>((_resolve, reject) => {
+				init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+			})) as typeof fetch)
+
+		await expect(getHttpStream('https://example.com/slow.jpg', { timeoutMs: 20 })).rejects.toThrow()
+	})
+
+	it('propagates a caller-provided abort signal', async () => {
+		globalThis.fetch = jest.fn((async (_url: RequestInfo | URL, init?: RequestInit) =>
+			new Promise<Response>((_resolve, reject) => {
+				init?.signal?.addEventListener('abort', () => reject(new Error('caller aborted')))
+			})) as typeof fetch)
+
+		const caller = new AbortController()
+		const promise = getHttpStream('https://example.com/a.jpg', { signal: caller.signal, timeoutMs: 60_000 })
+		caller.abort(new Error('caller aborted'))
+		await expect(promise).rejects.toThrow('caller aborted')
+	})
+
+	it('still throws a Boom with the status for non-OK responses', async () => {
+		globalThis.fetch = jest.fn(
+			async () =>
+				({ ok: false, status: 404, headers: new Headers(), body: Readable.from([]) }) as unknown as Response
+		)
+
+		await expect(getHttpStream('https://example.com/missing.jpg')).rejects.toMatchObject({
+			output: { statusCode: 404 }
+		})
 	})
 })
 

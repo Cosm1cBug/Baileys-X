@@ -1,5 +1,5 @@
 import { Boom } from '@hapi/boom'
-import { exec } from 'child_process'
+import { execFile } from 'child_process'
 import * as Crypto from 'crypto'
 import { once } from 'events'
 import { createReadStream, createWriteStream, promises as fs, WriteStream } from 'fs'
@@ -128,14 +128,19 @@ const extractVideoThumb = async (
 	size: { width: number; height: number }
 ) =>
 	new Promise<void>((resolve, reject) => {
-		const cmd = `ffmpeg -ss ${time} -i ${path} -y -vf scale=${size.width}:-1 -vframes 1 -f image2 ${destPath}`
-		exec(cmd, err => {
-			if (err) {
-				reject(err)
-			} else {
-				resolve()
+		// execFile (no shell): path/time/destPath stay single argv entries, so a
+		// crafted file name or timestamp can never become shell syntax.
+		execFile(
+			'ffmpeg',
+			['-ss', time, '-i', path, '-y', '-vf', `scale=${size.width}:-1`, '-vframes', '1', '-f', 'image2', destPath],
+			err => {
+				if (err) {
+					reject(err)
+				} else {
+					resolve()
+				}
 			}
-		})
+		)
 	})
 
 export const extractImageThumb = async (bufferOrFilePath: Readable | Buffer | string, width = 32) => {
@@ -384,18 +389,105 @@ export async function generateThumbnail(
 	}
 }
 
-export const getHttpStream = async (url: string | URL, options: RequestInit & { isStream?: true } = {}) => {
-	const response = await fetch(url.toString(), {
-		dispatcher: options.dispatcher,
-		method: 'GET',
-		headers: options.headers as HeadersInit
-	})
+/** Default time to wait for response headers when fetching remote media (ms). */
+export const DEFAULT_HTTP_FETCH_TIMEOUT_MS = 30_000
+
+/**
+ * Default cap on remote media bodies fetched through `getHttpStream` (512 MiB).
+ * Generous enough for legitimate WhatsApp media, small enough to stop a hostile
+ * or broken server from exhausting memory/disk. Override per call with
+ * `maxContentLength` (`Infinity` disables the cap).
+ */
+export const DEFAULT_HTTP_MAX_CONTENT_LENGTH_BYTES = 512 * 1024 * 1024
+
+export type HttpStreamOptions = RequestInit & {
+	isStream?: true
+	/** Max response body size in bytes; `Infinity` disables the cap. */
+	maxContentLength?: number
+	/** Time to wait for response headers in ms (the body itself is not timed). 0 / `Infinity` disables. */
+	timeoutMs?: number
+}
+
+export const getHttpStream = async (url: string | URL, options: HttpStreamOptions = {}) => {
+	const {
+		timeoutMs = DEFAULT_HTTP_FETCH_TIMEOUT_MS,
+		maxContentLength = DEFAULT_HTTP_MAX_CONTENT_LENGTH_BYTES,
+		signal: callerSignal,
+		...fetchOptions
+	} = options
+
+	// The timeout covers connect + response headers only; it is cleared once the
+	// response arrives so long downloads are bounded by size, not wall-clock.
+	const controller = new AbortController()
+	const onCallerAbort = () => controller.abort(callerSignal?.reason)
+	let timeout: NodeJS.Timeout | undefined
+	if (callerSignal?.aborted) {
+		controller.abort(callerSignal.reason)
+	} else {
+		callerSignal?.addEventListener('abort', onCallerAbort, { once: true })
+		if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+			timeout = setTimeout(
+				() => controller.abort(new Error(`timed out after ${timeoutMs}ms waiting for response from ${url}`)),
+				timeoutMs
+			)
+		}
+	}
+
+	let response: Response
+	try {
+		response = await fetch(url.toString(), {
+			...fetchOptions,
+			method: 'GET',
+			headers: fetchOptions.headers as HeadersInit,
+			signal: controller.signal
+		})
+	} finally {
+		if (timeout) clearTimeout(timeout)
+		callerSignal?.removeEventListener('abort', onCallerAbort)
+	}
+
 	if (!response.ok) {
 		throw new Boom(`Failed to fetch stream from ${url}`, { statusCode: response.status, data: { url } })
 	}
 
+	const declaredLength = Number(response.headers.get('content-length'))
+	if (Number.isFinite(maxContentLength) && Number.isFinite(declaredLength) && declaredLength > maxContentLength) {
+		throw new Boom(`content length ${declaredLength} exceeds max ${maxContentLength} when fetching \"${url}\"`, {
+			statusCode: 413,
+			data: { url, maxContentLength }
+		})
+	}
+
 	// @ts-ignore Node18+ Readable.fromWeb exists
-	return response.body instanceof Readable ? response.body : Readable.fromWeb(response.body as any)
+	const body: Readable = response.body instanceof Readable ? response.body : Readable.fromWeb(response.body as any)
+
+	if (!Number.isFinite(maxContentLength)) {
+		return body
+	}
+
+	// Chunked responses may not declare a length, so enforce the cap while streaming.
+	// pipeline (not pipe) so source errors and consumer cancellation propagate both ways.
+	let received = 0
+	return pipeline(
+		body,
+		new Transform({
+			transform(chunk: Buffer, _encoding, callback) {
+				received += chunk.length
+				if (received > maxContentLength) {
+					callback(
+						new Boom(`content length exceeded max ${maxContentLength} when fetching \"${url}\"`, {
+							statusCode: 413,
+							data: { url, maxContentLength }
+						})
+					)
+					return
+				}
+
+				callback(null, chunk)
+			}
+		}),
+		() => {}
+	)
 }
 
 type EncryptedStreamOptions = {
