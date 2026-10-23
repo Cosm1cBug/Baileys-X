@@ -704,19 +704,23 @@ describe('getHttpStream', () => {
 	})
 
 	it('times out waiting for response headers', async () => {
-		globalThis.fetch = jest.fn((async (_url: RequestInfo | URL, init?: RequestInit) =>
-			new Promise<Response>((_resolve, reject) => {
-				init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
-			})) as typeof fetch)
+		globalThis.fetch = jest.fn(
+			(async (_url: RequestInfo | URL, init?: RequestInit) =>
+				new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+				})) as typeof fetch
+		)
 
 		await expect(getHttpStream('https://example.com/slow.jpg', { timeoutMs: 20 })).rejects.toThrow()
 	})
 
 	it('propagates a caller-provided abort signal', async () => {
-		globalThis.fetch = jest.fn((async (_url: RequestInfo | URL, init?: RequestInit) =>
-			new Promise<Response>((_resolve, reject) => {
-				init?.signal?.addEventListener('abort', () => reject(new Error('caller aborted')))
-			})) as typeof fetch)
+		globalThis.fetch = jest.fn(
+			(async (_url: RequestInfo | URL, init?: RequestInit) =>
+				new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener('abort', () => reject(new Error('caller aborted')))
+				})) as typeof fetch
+		)
 
 		const caller = new AbortController()
 		const promise = getHttpStream('https://example.com/a.jpg', { signal: caller.signal, timeoutMs: 60_000 })
@@ -726,8 +730,7 @@ describe('getHttpStream', () => {
 
 	it('still throws a Boom with the status for non-OK responses', async () => {
 		globalThis.fetch = jest.fn(
-			async () =>
-				({ ok: false, status: 404, headers: new Headers(), body: Readable.from([]) }) as unknown as Response
+			async () => ({ ok: false, status: 404, headers: new Headers(), body: Readable.from([]) }) as unknown as Response
 		)
 
 		await expect(getHttpStream('https://example.com/missing.jpg')).rejects.toMatchObject({
