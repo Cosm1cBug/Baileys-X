@@ -2104,7 +2104,22 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		{
 			isWsOpen: () => ws.isOpen,
 			onUnexpectedError,
-			yieldToEventLoop: () => new Promise(resolve => setImmediate(resolve))
+			yieldToEventLoop: () => new Promise(resolve => setImmediate(resolve)),
+			onBackpressureChange: backpressured => {
+				if (backpressured) {
+					// Stop reading new frames until the backlog drains. Nothing is
+					// dropped: unacked stanzas stay the server's responsibility and
+					// are re-delivered, and outgoing acks/keepalives are unaffected.
+					logger.warn(
+						{ queueDepth: offlineNodeProcessor.size() },
+						'offline queue high-water mark reached, pausing websocket intake'
+					)
+					ws.pause()
+				} else {
+					logger.info({ queueDepth: offlineNodeProcessor.size() }, 'offline queue drained, resuming websocket intake')
+					ws.resume()
+				}
+			}
 		}
 	)
 
@@ -2216,6 +2231,17 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		if (typeof isOnline !== 'undefined') {
 			sendActiveReceipts = isOnline
 			logger.trace(`sendActiveReceipts set to "${sendActiveReceipts}"`)
+		}
+
+		// A reconnect creates a fresh underlying websocket that knows nothing
+		// about a pause applied to its predecessor — re-apply it if the
+		// offline backlog is still past the high-water mark
+		if (connection === 'open' && offlineNodeProcessor.isBackpressured()) {
+			logger.warn(
+				{ queueDepth: offlineNodeProcessor.size() },
+				'reconnected with offline queue still backpressured, pausing websocket intake'
+			)
+			ws.pause()
 		}
 
 		// Flush pending tctoken index save on disconnect to avoid writing after close

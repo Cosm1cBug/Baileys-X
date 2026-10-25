@@ -17,6 +17,17 @@ export class WebSocketClient extends AbstractSocketClient {
 	get isConnecting(): boolean {
 		return this.socket?.readyState === WebSocket.CONNECTING
 	}
+	get isPaused(): boolean {
+		return this.socket?.isPaused ?? false
+	}
+
+	pause() {
+		this.socket?.pause()
+	}
+
+	resume() {
+		this.socket?.resume()
+	}
 
 	connect() {
 		if (this.socket) {

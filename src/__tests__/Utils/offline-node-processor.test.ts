@@ -329,4 +329,123 @@ describe('makeOfflineNodeProcessor', () => {
 			expect(mockOnUnexpectedError).toHaveBeenCalledTimes(2)
 		})
 	})
+
+	describe('backpressure', () => {
+		function createBackpressureProcessor(
+			handler: (node: BinaryNode) => Promise<void>,
+			transitions: boolean[],
+			highWaterMark = 3,
+			lowWaterMark = 1
+		) {
+			return makeOfflineNodeProcessor(
+				new Map<MessageType, (node: BinaryNode) => Promise<void>>([['message', handler]]),
+				{
+					isWsOpen: () => isWsOpen,
+					onUnexpectedError: mockOnUnexpectedError,
+					yieldToEventLoop: async () => {},
+					highWaterMark,
+					lowWaterMark,
+					onBackpressureChange: paused => transitions.push(paused)
+				}
+			)
+		}
+
+		it('engages at the high-water mark and releases at the low-water mark, losing nothing', async () => {
+			const processed: string[] = []
+			const transitions: boolean[] = []
+			let release!: () => void
+			const gate = new Promise<void>(r => {
+				release = r
+			})
+			let first = true
+			const handler = async (node: BinaryNode) => {
+				processed.push(node.attrs.id!)
+				if (first) {
+					first = false
+					await gate
+				}
+			}
+
+			const processor = createBackpressureProcessor(handler, transitions)
+			for (let i = 1; i <= 5; i++) {
+				processor.enqueue('message', makeNode(`msg-${i}`))
+			}
+
+			// first node is being processed, 4 are waiting: past the high-water mark of 3
+			expect(processor.isBackpressured()).toBe(true)
+			expect(transitions).toEqual([true])
+
+			release()
+			await new Promise(r => setTimeout(r, 20))
+
+			expect(processed).toEqual(['msg-1', 'msg-2', 'msg-3', 'msg-4', 'msg-5'])
+			expect(processor.size()).toBe(0)
+			expect(processor.isBackpressured()).toBe(false)
+			expect(transitions).toEqual([true, false])
+		})
+
+		it('does not engage below the high-water mark', async () => {
+			const transitions: boolean[] = []
+			const handler = jest.fn<(node: BinaryNode) => Promise<void>>().mockResolvedValue(undefined)
+			const processor = createBackpressureProcessor(handler, transitions)
+
+			processor.enqueue('message', makeNode('msg-1'))
+			processor.enqueue('message', makeNode('msg-2'))
+			await new Promise(r => setTimeout(r, 20))
+
+			expect(transitions).toEqual([])
+			expect(processor.isBackpressured()).toBe(false)
+		})
+
+		it('processes nodes enqueued while a handler is in flight, in FIFO order', async () => {
+			const processed: string[] = []
+			const transitions: boolean[] = []
+			let release!: () => void
+			const gate = new Promise<void>(r => {
+				release = r
+			})
+			let first = true
+			const handler = async (node: BinaryNode) => {
+				processed.push(node.attrs.id!)
+				if (first) {
+					first = false
+					await gate
+				}
+			}
+
+			const processor = createBackpressureProcessor(handler, transitions)
+			processor.enqueue('message', makeNode('msg-1'))
+			processor.enqueue('message', makeNode('msg-2'))
+			// msg-1's handler is still in flight when msg-3 arrives; it must be
+			// picked up by the running loop, after msg-2, without a second loop
+			release()
+			processor.enqueue('message', makeNode('msg-3'))
+
+			await new Promise(r => setTimeout(r, 20))
+			expect(processed).toEqual(['msg-1', 'msg-2', 'msg-3'])
+			expect(processor.size()).toBe(0)
+		})
+
+		it('retains unprocessed nodes while the connection is closed', async () => {
+			const processed: string[] = []
+			const transitions: boolean[] = []
+			const handler = async (node: BinaryNode) => {
+				processed.push(node.attrs.id!)
+			}
+
+			isWsOpen = false
+			const processor = createBackpressureProcessor(handler, transitions)
+			processor.enqueue('message', makeNode('msg-1'))
+			processor.enqueue('message', makeNode('msg-2'))
+			await new Promise(r => setTimeout(r, 10))
+			expect(processed).toEqual([])
+			expect(processor.size()).toBe(2)
+
+			isWsOpen = true
+			processor.enqueue('message', makeNode('msg-3'))
+			await new Promise(r => setTimeout(r, 20))
+			expect(processed).toEqual(['msg-1', 'msg-2', 'msg-3'])
+			expect(processor.size()).toBe(0)
+		})
+	})
 })
