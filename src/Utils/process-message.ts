@@ -33,6 +33,7 @@ import {
 import { aesDecryptGCM, hmacSign } from './crypto'
 import { getKeyAuthor, toNumber } from './generics'
 import { downloadAndProcessHistorySyncNotification } from './history'
+import { decodeLIDMigrationMappingSyncPayload } from './lid-migration-payload'
 import type { ILogger } from './logger'
 import { buildMergedTcTokenIndexWrite, resolveTcTokenJid } from './tc-token-utils'
 
@@ -543,8 +544,7 @@ const processMessage = async (
 				break
 			case proto.Message.ProtocolMessage.Type.LID_MIGRATION_MAPPING_SYNC:
 				const encodedPayload = protocolMsg.lidMigrationMappingSyncMessage?.encodedMappingPayload!
-				const { pnToLidMappings, chatDbMigrationTimestamp } =
-					proto.LIDMigrationMappingSyncPayload.decode(encodedPayload)
+				const { pnToLidMappings, chatDbMigrationTimestamp } = decodeLIDMigrationMappingSyncPayload(encodedPayload)
 				logger?.debug({ pnToLidMappings, chatDbMigrationTimestamp }, 'got lid mappings and chat db migration timestamp')
 				const pairs = []
 				for (const { pn, latestLid, assignedLid } of pnToLidMappings) {
