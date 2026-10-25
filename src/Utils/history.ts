@@ -139,6 +139,71 @@ export const processHistoryMessage = (item: proto.IHistorySync, logger?: ILogger
 	}
 }
 
+/** Default number of conversations processed per synchronous slice. */
+export const DEFAULT_HISTORY_BATCH_SIZE = 100
+
+export type HistoryProcessingOptions = {
+	/** Conversations processed per synchronous slice before yielding to the event loop. */
+	batchSize?: number
+	yieldToEventLoop?: () => Promise<void>
+}
+
+type ProcessedHistory = ReturnType<typeof processHistoryMessage>
+
+/**
+ * Async variant of `processHistoryMessage` that processes large payloads in
+ * bounded batches, yielding to the event loop between slices so a big history
+ * sync cannot starve stanza handling (and its acks) for seconds at a time.
+ * The result is identical to `processHistoryMessage` — the batch cap bounds
+ * each synchronous slice, never the total: nothing is truncated or dropped.
+ */
+export const processHistoryMessageBatched = async (
+	item: proto.IHistorySync,
+	logger?: ILogger,
+	options: HistoryProcessingOptions = {}
+): Promise<ProcessedHistory> => {
+	const batchSize = options.batchSize ?? DEFAULT_HISTORY_BATCH_SIZE
+	const yieldToEventLoop = options.yieldToEventLoop ?? (() => new Promise<void>(resolve => setImmediate(resolve)))
+	const conversations = item.conversations ?? []
+
+	// Small payloads (and sync types without conversations) need no slicing
+	if (conversations.length <= batchSize) {
+		return processHistoryMessage(item, logger)
+	}
+
+	const merged: ProcessedHistory = {
+		chats: [],
+		contacts: [],
+		messages: [],
+		lidPnMappings: [],
+		pastParticipants: item.pastParticipants,
+		syncType: item.syncType,
+		progress: item.progress
+	}
+
+	for (let start = 0; start < conversations.length; start += batchSize) {
+		const slice = processHistoryMessage(
+			{
+				...item,
+				conversations: conversations.slice(start, start + batchSize),
+				// Top-level mappings are emitted once, alongside the first slice
+				phoneNumberToLidMappings: start === 0 ? item.phoneNumberToLidMappings : []
+			},
+			logger
+		)
+		merged.chats.push(...slice.chats)
+		merged.contacts.push(...slice.contacts)
+		merged.messages.push(...slice.messages)
+		merged.lidPnMappings.push(...slice.lidPnMappings)
+
+		if (start + batchSize < conversations.length) {
+			await yieldToEventLoop()
+		}
+	}
+
+	return merged
+}
+
 export const downloadAndProcessHistorySyncNotification = async (
 	msg: proto.Message.IHistorySyncNotification,
 	options: RequestInit,
@@ -151,7 +216,7 @@ export const downloadAndProcessHistorySyncNotification = async (
 		historyMsg = await downloadHistory(msg, options)
 	}
 
-	return processHistoryMessage(historyMsg, logger)
+	return processHistoryMessageBatched(historyMsg, logger)
 }
 
 export const getHistoryMsg = (message: proto.IMessage) => {
