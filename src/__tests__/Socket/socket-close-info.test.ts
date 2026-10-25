@@ -1,5 +1,4 @@
 import { jest } from '@jest/globals'
-import type { BinaryNode } from '../../WABinary'
 
 /**
  * The `connection.update` close error should carry the WebSocket close frame
