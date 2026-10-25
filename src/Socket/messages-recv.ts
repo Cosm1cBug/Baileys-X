@@ -102,6 +102,11 @@ type ReachoutTimelockNotificationPayload = {
 	time_enforcement_ends?: string
 }
 
+type NewsletterPaidPartnershipNotificationPayload = {
+	newsletter_id?: string
+	server_id?: string
+}
+
 const ENFORCEMENT_TYPE_VALUES = new Set<string>(Object.values(ReachoutTimelockEnforcementType))
 
 function isValidEnforcementType(value: string | undefined): value is ReachoutTimelockEnforcementType {
@@ -279,6 +284,10 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 					handleMessageCappingNotification(data)
 					break
 
+				case 'NotificationNewsletterPaidPartnership':
+					handleNewsletterPaidPartnershipNotification(data)
+					break
+
 				// newsletter ops still use the legacy <mex> child structure
 				case 'NotificationNewsletterUpdate':
 				case 'NotificationLinkedProfilesUpdates':
@@ -293,7 +302,6 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 				case 'NotificationNewsletterAdminInviteRevoke':
 				case 'NotificationNewsletterWamoSubStatusChange':
 				case 'NotificationNewsletterBlockUser':
-				case 'NotificationNewsletterPaidPartnership':
 				case 'NotificationNewsletterMilestone':
 				case 'NewsletterResponseStateUpdate':
 					await handleLegacyMexNewsletterNotification(node)
@@ -359,6 +367,23 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 		logger.info({ payload }, 'received message capping update')
 		ev.emit('message-capping.update', payload)
+	}
+
+	const handleNewsletterPaidPartnershipNotification = (data: MexGqlData) => {
+		const payload = data.xwa2_notify_newsletter_paid_partnership as
+			| NewsletterPaidPartnershipNotificationPayload
+			| undefined
+
+		if (!payload?.newsletter_id) {
+			logger.warn({ data }, 'newsletter paid partnership notification missing newsletter_id')
+			return
+		}
+
+		logger.info({ payload }, 'received newsletter paid partnership update')
+		ev.emit('newsletter-partnership.update', {
+			id: payload.newsletter_id,
+			server_id: payload.server_id ?? ''
+		})
 	}
 
 	const handleLegacyMexNewsletterNotification = async (node: BinaryNode) => {
