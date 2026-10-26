@@ -164,6 +164,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 	// Debounce identity-change session refreshes per JID to avoid bursts
 	const identityAssertDebounce = new NodeCache<boolean>({ stdTTL: 5, useClones: false })
+	const identityChangeCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 	let sendActiveReceipts = false
 
@@ -821,7 +822,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	const reissueTcTokenAfterIdentityChange = (from: string): void => {
 		void (async () => {
 			const normalizedJid = jidNormalizedUser(from)
-			const tcJid = await resolveTcTokenJid(normalizedJid, getLIDForPN)
+			const tcJid = await resolveTcTokenJid(normalizedJid, getLIDForPN, logger)
 			const tcTokenData = await authState.keys.get('tctoken', [tcJid])
 			const senderTs = tcTokenData?.[tcJid]?.senderTimestamp
 
@@ -835,7 +836,8 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 				normalizedJid,
 				sock.serverProps.lidTrustedTokenIssueToLid,
 				getLIDForPN,
-				getPNForLID
+				getPNForLID,
+				logger
 			)
 			const result = await issuePrivacyTokens([issueJid], senderTs)
 			await storeTcTokensFromIqResult({
@@ -843,7 +845,8 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 				fallbackJid: tcJid,
 				keys: authState.keys,
 				getLIDForPN,
-				onNewJidStored: trackTcTokenJid
+				onNewJidStored: trackTcTokenJid,
+				logger
 			})
 		})().catch(err => {
 			logger.debug({ jid: from, err: err?.message }, 'failed to re-issue tctoken after identity change')
@@ -879,7 +882,27 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 				assertSessions,
 				debounceCache: identityAssertDebounce,
 				logger,
-				onBeforeSessionRefresh: reissueTcTokenAfterIdentityChange
+				onBeforeSessionRefresh: reissueTcTokenAfterIdentityChange,
+				onParticipantIdentityChange: (jid, me) => {
+					const normalized = jidNormalizedUser(jid)
+					sock.recentlyChangedIdentities.add(normalized)
+					ev.emit('identity-change', { jid: normalized, me })
+
+					const existing = identityChangeCleanupTimers.get(normalized)
+					if (existing) {
+						clearTimeout(existing)
+					}
+
+					const timeout = setTimeout(
+						() => {
+							sock.recentlyChangedIdentities.delete(normalized)
+							identityChangeCleanupTimers.delete(normalized)
+						},
+						10 * 60 * 1000
+					)
+					timeout.unref()
+					identityChangeCleanupTimers.set(normalized, timeout)
+				}
 			})
 
 			if (result.action === 'no_identity_node') {
@@ -1366,7 +1389,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 			node.attrs.sender_lid && isLidUser(jidNormalizedUser(node.attrs.sender_lid))
 				? jidNormalizedUser(node.attrs.sender_lid)
 				: undefined
-		const fallbackJid = senderLid ?? (await resolveTcTokenJid(from, getLIDForPN))
+		const fallbackJid = senderLid ?? (await resolveTcTokenJid(from, getLIDForPN, logger))
 
 		logger.debug({ from, storageJid: fallbackJid }, 'processing privacy token notification')
 
@@ -1375,7 +1398,8 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 			fallbackJid,
 			keys: authState.keys,
 			getLIDForPN,
-			onNewJidStored: trackTcTokenJid
+			onNewJidStored: trackTcTokenJid,
+			logger
 		})
 	}
 
@@ -2030,12 +2054,13 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 					void (async () => {
 						try {
 							const getPNForLID = signalRepository.lidMapping.getPNForLID.bind(signalRepository.lidMapping)
-							const tcStorageJid = await resolveTcTokenJid(ackFrom, getLIDForPN)
+							const tcStorageJid = await resolveTcTokenJid(ackFrom, getLIDForPN, logger)
 							const issueJid = await resolveIssuanceJid(
 								ackFrom,
 								sock.serverProps.lidTrustedTokenIssueToLid,
 								getLIDForPN,
-								getPNForLID
+								getPNForLID,
+								logger
 							)
 							const result = await issuePrivacyTokens([issueJid], unixTimestampSeconds())
 							await storeTcTokensFromIqResult({
@@ -2043,7 +2068,8 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 								fallbackJid: tcStorageJid,
 								keys: authState.keys,
 								getLIDForPN,
-								onNewJidStored: trackTcTokenJid
+								onNewJidStored: trackTcTokenJid,
+								logger
 							})
 							logger.debug({ from: ackFrom }, 'completed 463 token recovery issuance')
 						} catch (err: any) {
