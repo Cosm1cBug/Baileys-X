@@ -403,6 +403,14 @@ export const makeSocket = (config: SocketConfig) => {
 	/** log & process any unexpected errors */
 	const onUnexpectedError = (err: Error | Boom, msg: string) => {
 		logger.error({ err }, `unexpected error in '${msg}'`)
+		// Surface the failure to the application; it would otherwise only
+		// exist in the logs. This runs inside catch handlers, so a throwing
+		// listener must never escape and turn into an unhandled rejection.
+		try {
+			ev.emit('processing.error', { error: err, context: msg })
+		} catch (emitError) {
+			logger.error({ err: emitError }, `'processing.error' listener threw`)
+		}
 	}
 
 	/** await the next incoming message */

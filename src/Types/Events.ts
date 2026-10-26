@@ -127,6 +127,15 @@ export type BaileysEventMap = {
 
 	'message-capping.update': NewChatMessageCapInfo
 
+	/**
+	 * Unexpected errors swallowed while processing incoming stanzas or
+	 * internal tasks. Emitted alongside the error log, so applications can
+	 * count, alert on, or otherwise react to processing failures instead of
+	 * only being able to read about them afterwards. `context` names the
+	 * task that failed (e.g. 'processing message', 'handling call').
+	 */
+	'processing.error': { error: Error; context: string }
+
 	/** Settings and actions sync events */
 	'chats.lock': { id: string; locked: boolean }
 	'settings.update':

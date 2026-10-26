@@ -360,6 +360,13 @@ sock.ev.on('messages.upsert', ({ messages }) => {
 })
 ```
 
+Unexpected errors while processing messages, calls, receipts or internal tasks are also emitted (in addition to being logged), so you can count or alert on them instead of only reading logs after the fact:
+```ts
+sock.ev.on('processing.error', ({ error, context }) => {
+    console.error(`failed during ${context}`, error)
+})
+```
+
 ### Example to Start
 
 > [!NOTE]
