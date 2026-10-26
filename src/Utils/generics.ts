@@ -232,15 +232,58 @@ export function bindWaitForEvent<T extends keyof BaileysEventMap>(ev: BaileysEve
 
 export const bindWaitForConnectionUpdate = (ev: BaileysEventEmitter) => bindWaitForEvent(ev, 'connection.update')
 
+/** Default time to wait for a version-check response (ms). */
+export const DEFAULT_VERSION_FETCH_TIMEOUT_MS = 30_000
+
+export type VersionFetchOptions = RequestInit & {
+	/** Time to wait for response headers in ms; the body itself is not timed. 0 / `Infinity` disables. */
+	timeoutMs?: number
+}
+
+/**
+ * fetch() with a bounded wait: the caller's abort signal is honoured and a
+ * timeout aborts the request if response headers take too long. Previously
+ * the version fetchers had no timeout at all, so a stalled connection could
+ * hang the caller forever.
+ */
+const fetchVersion = async (url: string, options: VersionFetchOptions) => {
+	const { timeoutMs = DEFAULT_VERSION_FETCH_TIMEOUT_MS, signal: callerSignal, ...fetchOptions } = options
+
+	const controller = new AbortController()
+	const onCallerAbort = () => controller.abort(callerSignal?.reason)
+	let timeout: NodeJS.Timeout | undefined
+	if (callerSignal?.aborted) {
+		controller.abort(callerSignal.reason)
+	} else {
+		callerSignal?.addEventListener('abort', onCallerAbort, { once: true })
+		if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+			timeout = setTimeout(
+				() => controller.abort(new Error(`timed out after ${timeoutMs}ms waiting for response from ${url}`)),
+				timeoutMs
+			)
+		}
+	}
+
+	try {
+		return await fetch(url, { ...fetchOptions, signal: controller.signal })
+	} finally {
+		if (timeout) {
+			clearTimeout(timeout)
+		}
+
+		callerSignal?.removeEventListener('abort', onCallerAbort)
+	}
+}
+
 /**
  * utility that fetches latest baileys version from the master branch.
  * Use to ensure your WA connection is always on the latest version
  */
-export const fetchLatestBaileysVersion = async (options: RequestInit = {}) => {
+export const fetchLatestBaileysVersion = async (options: VersionFetchOptions = {}) => {
 	const URL = 'https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/index.ts'
 	try {
-		const response = await fetch(URL, {
-			dispatcher: options.dispatcher,
+		const response = await fetchVersion(URL, {
+			...options,
 			method: 'GET',
 			headers: options.headers
 		})
@@ -277,7 +320,7 @@ export const fetchLatestBaileysVersion = async (options: RequestInit = {}) => {
  * A utility that fetches the latest web version of whatsapp.
  * Use to ensure your WA connection is always on the latest version
  */
-export const fetchLatestWaWebVersion = async (options: RequestInit = {}) => {
+export const fetchLatestWaWebVersion = async (options: VersionFetchOptions = {}) => {
 	try {
 		// Absolute minimal headers required to bypass anti-bot detection
 		const defaultHeaders = {
@@ -288,7 +331,7 @@ export const fetchLatestWaWebVersion = async (options: RequestInit = {}) => {
 
 		const headers = { ...defaultHeaders, ...options.headers }
 
-		const response = await fetch('https://web.whatsapp.com/sw.js', {
+		const response = await fetchVersion('https://web.whatsapp.com/sw.js', {
 			...options,
 			method: 'GET',
 			headers

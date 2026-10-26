@@ -716,7 +716,12 @@ export const makeSocket = (config: SocketConfig) => {
 				check if it's been a suspicious amount of time since the server responded with our last seen
 				it could be that the network is down
 			*/
-			if (diff > keepAliveIntervalMs + 5000) {
+			// While intake is paused for offline-queue backpressure, no frames
+			// arrive by design — a stale lastDateRecv is expected, not a dead
+			// connection, so the dead-check is skipped then. Keepalive pings
+			// still go out (pause only stops reading), and ws close/error
+			// events still fire if the TCP path dies.
+			if (diff > keepAliveIntervalMs + 5000 && !ws.isPaused) {
 				void end(new Boom('Connection was lost', { statusCode: DisconnectReason.connectionLost }))
 			} else if (ws.isOpen) {
 				// if its all good, send a keep alive request
