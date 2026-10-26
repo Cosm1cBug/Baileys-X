@@ -95,7 +95,9 @@ export const getUrlInfo = async (
 				urlInfo.highQualityThumbnail = imageMessage || undefined
 			} else {
 				try {
-					urlInfo.jpegThumbnail = image ? (await getCompressedJpegThumbnail(image, opts)).buffer : undefined
+					const thumbnail = image ? (await getCompressedJpegThumbnail(image, opts)).buffer : undefined
+					// an empty buffer means no image library was available
+					urlInfo.jpegThumbnail = thumbnail?.length ? thumbnail : undefined
 				} catch (error: any) {
 					opts.logger?.debug({ err: error.stack, url: previewLink }, 'error in generating thumbnail')
 				}
