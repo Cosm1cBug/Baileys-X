@@ -1,0 +1,15 @@
+# Dependabot version updates: runtime/dev dependencies and GitHub Actions.
+# PRs are opened for review like any other change — nothing auto-merges
+# here except through the usual branch checks, and dependency bumps are
+# expected to keep the full test suite green before merge.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

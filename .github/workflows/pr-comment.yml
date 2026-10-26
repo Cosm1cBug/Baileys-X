@@ -12,7 +12,11 @@ jobs:
   pr-comment:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions: write-all
+    # Least privilege: this job only reads the base tree (pull_request_target
+    # never checks out PR code) and posts one PR comment.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v3
 
