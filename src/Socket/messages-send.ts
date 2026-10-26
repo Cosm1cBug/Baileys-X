@@ -36,10 +36,12 @@ import {
 	getWAUploadToServer,
 	hasValidAlbumMedia,
 	isViewOnceMessage,
+	MessageRetryCoordinator,
 	MessageRetryManager,
 	normalizeMessageContent,
 	parseAndInjectE2ESessions,
-	unixTimestampSeconds
+	unixTimestampSeconds,
+	withMessageRetryInvalidation
 } from '../Utils'
 import { prepareMessageForBot } from '../Utils/bot-message'
 import { getUrlInfo } from '../Utils/link-preview'
@@ -186,8 +188,13 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 	/** Serializes writes to userDevicesCache across USync refresh and device-notification handling. */
 	const devicesMutex = makeMutex()
 
-	// Initialize message retry manager if enabled
-	const messageRetryManager = enableRecentMessageCache ? new MessageRetryManager(logger, maxMsgRetryCount) : null
+	// Edit/revoke-vs-retry coordination stays active even when the optional
+	// recent-message payload cache is disabled, so a stale pre-edit message
+	// can never be resurrected by a later retry receipt.
+	const messageRetryCoordinator = new MessageRetryCoordinator()
+	const messageRetryManager = enableRecentMessageCache
+		? new MessageRetryManager(logger, maxMsgRetryCount, messageRetryCoordinator)
+		: null
 
 	// Prevent race conditions in Signal session encryption by user
 	const encryptionMutex = makeKeyedMutex()
@@ -1453,6 +1460,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		mediaConn = undefined
 		if (messageRetryManager) {
 			messageRetryManager.clear()
+		} else {
+			messageRetryCoordinator.clear()
 		}
 	})
 
@@ -1476,6 +1485,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		createParticipantNodes,
 		getUSyncDevices,
 		messageRetryManager,
+		messageRetryCoordinator,
 		updateMemberLabel,
 		sendInteractive,
 		inappsignup: sendInteractive,
@@ -1719,14 +1729,20 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					})
 				}
 
-				await relayMessage(jid, fullMsg.message!, {
-					messageId: fullMsg.key.id!,
-					useCachedGroupMetadata: options.useCachedGroupMetadata,
-					additionalAttributes,
-					addBizAttributes: isNeedBizAttrs,
-					statusJidList: options.statusJidList,
-					additionalNodes
-				})
+				const relay = () =>
+					relayMessage(jid, fullMsg.message!, {
+						messageId: fullMsg.key.id!,
+						useCachedGroupMetadata: options.useCachedGroupMetadata,
+						additionalAttributes,
+						addBizAttributes: isNeedBizAttrs,
+						statusJidList: options.statusJidList,
+						additionalNodes
+					})
+
+				// An edit/revoke relay is serialized with retry resends of the
+				// target message; once it succeeds the original is invalidated
+				// so no pending retry can resend its stale content.
+				await withMessageRetryInvalidation(messageRetryCoordinator, messageRetryManager, content, relay)
 				if (config.emitOwnEvents) {
 					process.nextTick(async () => {
 						await messageMutex.mutex(() => upsertMessage(fullMsg, 'append'))
