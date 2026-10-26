@@ -1596,7 +1596,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 				if (config.emitOwnEvents) {
 					process.nextTick(async () => {
-						await messageMutex.mutex(() => upsertMessage(fullMsg, 'append'))
+						await messageMutex.mutex(fullMsg.key.remoteJid || '__no-chat__', () => upsertMessage(fullMsg, 'append'))
 					})
 				}
 
@@ -1618,7 +1618,9 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 					if (config.emitOwnEvents) {
 						process.nextTick(async () => {
-							await messageMutex.mutex(() => upsertMessage(mentionMsg, 'append'))
+							await messageMutex.mutex(mentionMsg.key.remoteJid || '__no-chat__', () =>
+								upsertMessage(mentionMsg, 'append')
+							)
 						})
 					}
 
@@ -1745,7 +1747,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				await withMessageRetryInvalidation(messageRetryCoordinator, messageRetryManager, content, relay)
 				if (config.emitOwnEvents) {
 					process.nextTick(async () => {
-						await messageMutex.mutex(() => upsertMessage(fullMsg, 'append'))
+						await messageMutex.mutex(fullMsg.key.remoteJid || '__no-chat__', () => upsertMessage(fullMsg, 'append'))
 					})
 				}
 
@@ -1786,7 +1788,9 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 						if (config.emitOwnEvents) {
 							process.nextTick(async () => {
-								await messageMutex.mutex(() => upsertMessage(albumMsg, 'append'))
+								await messageMutex.mutex(albumMsg.key.remoteJid || '__no-chat__', () =>
+									upsertMessage(albumMsg, 'append')
+								)
 							})
 						}
 

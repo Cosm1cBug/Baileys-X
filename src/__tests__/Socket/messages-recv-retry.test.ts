@@ -24,6 +24,10 @@ const immediateMutex = {
 	mutex: async <T>(task: () => Promise<T> | T) => task()
 }
 
+const immediateKeyedMutex = {
+	mutex: async <T>(_key: string, task: () => Promise<T> | T) => task()
+}
+
 const remoteJid = '120363000000000000@g.us'
 const participant = 'peer@s.whatsapp.net'
 const messageId = 'MESSAGE-ID'
@@ -119,7 +123,7 @@ describe('retry receipt handling', () => {
 					handlers.set(event, handler)
 				})
 			},
-			messageMutex: immediateMutex,
+			messageMutex: immediateKeyedMutex,
 			notificationMutex: immediateMutex,
 			receiptMutex: immediateMutex,
 			signalRepository: {
