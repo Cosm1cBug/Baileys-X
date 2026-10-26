@@ -1812,7 +1812,12 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 				}
 			}
 
-			await messageMutex.mutex(async () => {
+			// Per-chat lock: messages within a chat keep their arrival order
+			// (decrypt -> receipts -> upsert), while different chats process in
+			// parallel. A Signal session only ever serves one chat, so this
+			// split cannot race a ratchet. '__no-chat__' is the defensive
+			// fallback for a stanza without a remoteJid.
+			await messageMutex.mutex(msg.key.remoteJid || '__no-chat__', async () => {
 				await decrypt()
 
 				if (msg.key?.remoteJid && msg.key?.id && msg.message && messageRetryManager) {

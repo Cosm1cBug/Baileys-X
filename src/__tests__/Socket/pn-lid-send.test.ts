@@ -69,7 +69,7 @@ function makeFixture(lidBehavior: LidBehavior) {
 		serverProps: { privacyTokenOn1to1: false, lidTrustedTokenIssueToLid: false },
 		registerSocketEndHandler: jest.fn(),
 		messageMutex: {
-			mutex: async (work: () => Promise<unknown>) => {
+			mutex: async (_key: string, work: () => Promise<unknown>) => {
 				await work()
 			}
 		},

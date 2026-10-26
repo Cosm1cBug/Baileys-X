@@ -47,7 +47,7 @@ import {
 	processSyncAction
 } from '../Utils'
 import type { ILogger } from '../Utils/logger'
-import { makeMutex } from '../Utils/make-mutex'
+import { makeKeyedMutex, makeMutex } from '../Utils/make-mutex'
 import processMessage from '../Utils/process-message'
 import { buildTcTokenFromJid } from '../Utils/tc-token-utils'
 import {
@@ -206,14 +206,14 @@ export const makeChatsSocket = (config: SocketConfig) => {
 
 	let syncState: SyncState = SyncState.Connecting
 
-	/** this mutex ensures that messages are processed in order */
-	const messageMutex = makeMutex()
+	/** this mutex ensures that messages are processed in order within each chat (chats run in parallel) */
+	const messageMutex = makeKeyedMutex()
 
 	/** this mutex ensures that receipts are processed in order */
 	const receiptMutex = makeMutex()
 
-	/** this mutex ensures that app state patches are processed in order */
-	const appStatePatchMutex = makeMutex()
+	/** this mutex ensures that app state patches are processed in order per collection */
+	const appStatePatchMutex = makeKeyedMutex()
 
 	/** this mutex ensures that notifications are processed in order */
 	const notificationMutex = makeMutex()
@@ -1006,7 +1006,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		let initial: LTHashState
 		let encodeResult: { patch: proto.ISyncdPatch; state: LTHashState }
 
-		await appStatePatchMutex.mutex(async () => {
+		await appStatePatchMutex.mutex(name, async () => {
 			await authState.keys.transaction(async () => {
 				logger.debug({ patch: patchCreate }, 'applying app patch')
 
