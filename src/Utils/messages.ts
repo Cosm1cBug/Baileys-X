@@ -1,7 +1,8 @@
 import { Boom } from '@hapi/boom'
 import { randomBytes } from 'crypto'
-import { promises as fs } from 'fs'
+import { createWriteStream, promises as fs } from 'fs'
 import { type Transform } from 'stream'
+import { pipeline } from 'stream/promises'
 import { proto } from '../../WAProto/index.js'
 import {
 	CALL_AUDIO_PREFIX,
@@ -36,6 +37,7 @@ import type { ILogger } from './logger'
 import {
 	downloadContentFromMessage,
 	encryptedStream,
+	extensionForMediaMessage,
 	generateThumbnail,
 	getAudioDuration,
 	getAudioWaveform,
@@ -1791,6 +1793,34 @@ export const downloadMediaMessage = async <Type extends 'buffer' | 'stream'>(
 
 		return stream
 	}
+}
+
+/**
+ * Downloads the given message straight to disk: the decrypted stream is
+ * piped to the file, so peak memory stays flat no matter how large the
+ * media is (unlike the 'buffer' mode of downloadMediaMessage). Returns
+ * the path written; a partial file is removed if the download fails.
+ */
+export const downloadAndSaveMediaMessage = async (
+	message: WAMessage,
+	filename: string,
+	attachExtension = true,
+	options: MediaDownloadOptions = {},
+	ctx?: DownloadMediaMessageContext
+) => {
+	const stream = await downloadMediaMessage(message, 'stream', options, ctx)
+	// extensionForMediaMessage returns a bare extension ('jpeg') for most types
+	const extension = extensionForMediaMessage(message.message!)
+	const filePath =
+		attachExtension && extension ? filename + (extension.startsWith('.') ? extension : `.${extension}`) : filename
+	try {
+		await pipeline(stream, createWriteStream(filePath))
+	} catch (error) {
+		await fs.unlink(filePath).catch(() => {})
+		throw error
+	}
+
+	return filePath
 }
 
 /** Checks whether the given message is a media message; if it is returns the inner content */
