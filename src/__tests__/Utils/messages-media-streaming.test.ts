@@ -2,6 +2,7 @@ import { jest } from '@jest/globals'
 import { createCipheriv, randomBytes } from 'crypto'
 import { existsSync } from 'fs'
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { createRequire } from 'module'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type { WAMessage } from '../../Types'
@@ -15,10 +16,26 @@ import type { WAMessage } from '../../Types'
  *    image headers in pure TypeScript
  *
  * sharp/jimp are mocked to empty modules below, so the "no usable image
- * library" fallback is what actually runs in this suite.
+ * library" fallback is what actually runs in this suite. sharp is an
+ * optional peer dependency and is not installed everywhere (e.g. CI), so
+ * its mock is only registered when the module can be resolved at all —
+ * where it cannot, the dynamic import fails on its own, which is exactly
+ * the condition the fallback handles.
  */
-jest.unstable_mockModule('sharp', () => ({}))
 jest.unstable_mockModule('jimp', () => ({}))
+
+const sharpResolvable = (() => {
+	try {
+		createRequire(import.meta.url).resolve('sharp')
+		return true
+	} catch {
+		return false
+	}
+})()
+
+if (sharpResolvable) {
+	jest.unstable_mockModule('sharp', () => ({}))
+}
 
 const { extractImageThumb, generateThumbnail, getImageDimensions, getMediaKeys } = await import(
 	'../../Utils/messages-media'
@@ -179,7 +196,7 @@ describe('downloadAndSaveMediaMessage', () => {
 	it('streams decrypted media to disk and appends the extension', async () => {
 		const plaintext = Buffer.alloc(4096, 7)
 		const { encrypted, message } = await makeImageMessage(plaintext)
-		globalThis.fetch = (async () => new Response(encrypted)) as typeof fetch
+		globalThis.fetch = async () => new Response(encrypted)
 
 		const written = await downloadAndSaveMediaMessage(message, join(dir, 'photo'))
 
@@ -190,7 +207,7 @@ describe('downloadAndSaveMediaMessage', () => {
 	it('writes to the exact path when attachExtension is false', async () => {
 		const plaintext = Buffer.from('small payload')
 		const { encrypted, message } = await makeImageMessage(plaintext)
-		globalThis.fetch = (async () => new Response(encrypted)) as typeof fetch
+		globalThis.fetch = async () => new Response(encrypted)
 
 		const written = await downloadAndSaveMediaMessage(message, join(dir, 'photo.bin'), false)
 
@@ -200,7 +217,7 @@ describe('downloadAndSaveMediaMessage', () => {
 
 	it('removes the partial file when decryption fails mid-download', async () => {
 		const { message } = await makeImageMessage(Buffer.from('irrelevant'))
-		globalThis.fetch = (async () => new Response(Buffer.from('too short'))) as typeof fetch
+		globalThis.fetch = async () => new Response(Buffer.from('too short'))
 
 		const target = join(dir, 'broken')
 		await expect(downloadAndSaveMediaMessage(message, target)).rejects.toThrow()
