@@ -1,9 +1,12 @@
 name: Publish Release
 
+# Manual dispatch only. This used to fire on every 'v*' tag push, which
+# meant a routine snapshot tag attempted an npm publish of `baileys`
+# (observed 2026-10-26: run failed on npm auth for this fork). Publishing
+# is a deliberate act, so it stays available here and via manual-release,
+# but never as a side effect of pushing a tag.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
