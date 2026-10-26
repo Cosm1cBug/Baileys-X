@@ -145,6 +145,32 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 	const getLIDForPN = signalRepository.lidMapping.getLIDForPN.bind(signalRepository.lidMapping)
 
 	/**
+	 * Users whose identity changed recently (e.g. PN to LID migration). Group
+	 * sends treat their devices as not yet holding the sender key, forcing a
+	 * fresh sender-key distribution. Managed by messages-recv via
+	 * `identity-change` notifications; entries expire there after 10 minutes.
+	 */
+	const recentlyChangedIdentities = new Set<string>()
+
+	/**
+	 * Resolve a PN destination to its LID on LID-migrated accounts (WA Web
+	 * addresses the LID once a mapping exists). Any lookup failure keeps the
+	 * original PN — a send must never fail because of the mapping lookup.
+	 */
+	const resolveDestinationToLid = async (jid: string): Promise<string> => {
+		if (jidDecode(jid)?.server !== 's.whatsapp.net') {
+			return jid
+		}
+
+		try {
+			return (await getLIDForPN(jid)) ?? jid
+		} catch (error) {
+			logger.debug({ jid, err: error }, 'failed to check LID mapping for PN')
+			return jid
+		}
+	}
+
+	/**
 	 * Set of tctoken storage JIDs with a fire-and-forget `issuePrivacyTokens` IQ in flight.
 	 * Prevents duplicate IQs from rapid back-to-back sends before `senderTimestamp` persists.
 	 * Entries are always removed in `.finally()`, so the set is bounded by concurrency.
@@ -682,6 +708,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			addBizAttributes
 		}: MessageRelayOptions
 	) => {
+		jid = await resolveDestinationToLid(jid)
+
 		const meId = assertMeId(authState.creds)
 		const meLid = authState.creds.me?.lid
 		const isRetryResend = Boolean(participant?.jid)
@@ -882,7 +910,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				const senderKeyRecipients: string[] = []
 				for (const device of devices) {
 					const deviceJid = device.jid
-					const hasKey = !!senderKeyMap[deviceJid]
+					const hasKey = !recentlyChangedIdentities.has(jidNormalizedUser(deviceJid)) && !!senderKeyMap[deviceJid]
 					if (
 						(!hasKey || !!participant) &&
 						!isHostedLidUser(deviceJid) &&
@@ -1168,7 +1196,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			const is1on1Send = !isGroup && !isRetryResend && !isStatus && !isNewsletter && !isPeerMessage
 
 			// Resolve destination to LID for tctoken storage — matches Signal session key pattern
-			const tcTokenJid = is1on1Send ? await resolveTcTokenJid(destinationJid, getLIDForPN) : destinationJid
+			const tcTokenJid = is1on1Send ? await resolveTcTokenJid(destinationJid, getLIDForPN, logger) : destinationJid
 			const contactTcTokenData = is1on1Send ? await authState.keys.get('tctoken', [tcTokenJid]) : {}
 			const existingTokenEntry = contactTcTokenData[tcTokenJid]
 			let tcTokenBuffer = existingTokenEntry?.token
@@ -1430,6 +1458,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 	return {
 		...sock,
+		recentlyChangedIdentities,
 		userDevicesCache,
 		devicesMutex,
 		issuePrivacyTokens,
@@ -1588,6 +1617,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 				return fullMsg
 			}
+
+			jid = await resolveDestinationToLid(jid)
 
 			if (
 				typeof content === 'object' &&

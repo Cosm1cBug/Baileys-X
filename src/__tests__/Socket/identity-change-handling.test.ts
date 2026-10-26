@@ -249,4 +249,83 @@ describe('Identity Change Handling', () => {
 			expect(onBeforeSessionRefresh).not.toHaveBeenCalled()
 		})
 	})
+
+	describe('onParticipantIdentityChange', () => {
+		type IdentityChangeCallback = (jid: string, me: boolean) => void | Promise<void>
+
+		it('fires even when the session refresh is skipped for offline processing', async () => {
+			const onParticipantIdentityChange = jest.fn<IdentityChangeCallback>()
+			mockValidateSession.mockResolvedValue({ exists: true })
+
+			const result = await handleIdentityChange(createIdentityChangeNode('user@s.whatsapp.net', '1'), {
+				...createContext(),
+				onParticipantIdentityChange
+			})
+
+			expect(result.action).toBe('skipped_offline')
+			expect(onParticipantIdentityChange).toHaveBeenCalledWith('user@s.whatsapp.net', false)
+		})
+
+		it('fires with me=true for the own primary identity', async () => {
+			const onParticipantIdentityChange = jest.fn<IdentityChangeCallback>()
+
+			const result = await handleIdentityChange(createIdentityChangeNode(mockMeId), {
+				...createContext(),
+				onParticipantIdentityChange
+			})
+
+			expect(result.action).toBe('skipped_self_primary')
+			expect(onParticipantIdentityChange).toHaveBeenCalledWith(mockMeId, true)
+		})
+
+		it('fires before the debounce check, so bursts keep notifying', async () => {
+			const onParticipantIdentityChange = jest.fn<IdentityChangeCallback>()
+			mockValidateSession.mockResolvedValue({ exists: true })
+
+			await handleIdentityChange(createIdentityChangeNode('user@s.whatsapp.net'), {
+				...createContext(),
+				onParticipantIdentityChange
+			})
+			const second = await handleIdentityChange(createIdentityChangeNode('user@s.whatsapp.net'), {
+				...createContext(),
+				onParticipantIdentityChange
+			})
+
+			expect(second.action).toBe('debounced')
+			expect(onParticipantIdentityChange).toHaveBeenCalledTimes(2)
+		})
+
+		it('a throwing callback does not break session refresh', async () => {
+			const onParticipantIdentityChange = jest
+				.fn<IdentityChangeCallback>()
+				.mockRejectedValue(new Error('listener boom'))
+			mockValidateSession.mockResolvedValue({ exists: true })
+
+			const result = await handleIdentityChange(createIdentityChangeNode('user@s.whatsapp.net'), {
+				...createContext(),
+				onParticipantIdentityChange
+			})
+
+			expect(result.action).toBe('session_refreshed')
+			expect(mockAssertSessions).toHaveBeenCalled()
+		})
+
+		it('does not fire without an identity node or for companion devices', async () => {
+			const onParticipantIdentityChange = jest.fn<IdentityChangeCallback>()
+
+			const noIdentity = await handleIdentityChange(
+				{ tag: 'notification', attrs: { from: 'user@s.whatsapp.net', type: 'encrypt' }, content: [] },
+				{ ...createContext(), onParticipantIdentityChange }
+			)
+			expect(noIdentity.action).toBe('no_identity_node')
+
+			const companion = await handleIdentityChange(createIdentityChangeNode('user:5@s.whatsapp.net'), {
+				...createContext(),
+				onParticipantIdentityChange
+			})
+			expect(companion.action).toBe('skipped_companion_device')
+
+			expect(onParticipantIdentityChange).not.toHaveBeenCalled()
+		})
+	})
 })
