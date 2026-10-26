@@ -91,6 +91,7 @@ import makeWASocket from '@whiskeysockets/baileys'
   - [🔔 Receive Notifications in Whatsapp App](#receive-notifications-in-whatsapp-app)
 - [💾 Saving & Restoring Sessions](#saving--restoring-sessions)
 - [📡 Handling Events](#handling-events)
+  - [📡 All Events — Complete Reference (37)](#-all-events--complete-reference-37)
   - [▶️ Example to Start](#example-to-start)
   - [📊 Decrypt Poll Votes](#decrypt-poll-votes)
   - [🧭 Summary of Events on First Connection](#summary-of-events-on-first-connection)
@@ -364,6 +365,386 @@ Unexpected errors while processing messages, calls, receipts or internal tasks a
 ```ts
 sock.ev.on('processing.error', ({ error, context }) => {
     console.error(`failed during ${context}`, error)
+})
+```
+
+### 📡 All Events — Complete Reference (37)
+
+Every event declared in the `BaileysEventMap` type — nothing omitted. Each one
+with a minimal, working listener. Most events are delivered immediately; a few
+(`chats.*`, `contacts.*`, `messages.*`, `groups.update`, history) may be
+consolidated by the event buffer during stanza bursts and flushed together —
+the payloads below are what your handler receives either way.
+
+**Index:**
+`connection.update` · `creds.update` · `messaging-history.set` · `messaging-history.status` · `chats.upsert` · `chats.update` · `chats.delete` · `lid-mapping.update` · `contacts.upsert` · `contacts.update` · `presence.update` · `messages.upsert` · `messages.update` · `messages.delete` · `messages.media-update` · `messages.reaction` · `message-receipt.update` · `groups.upsert` · `groups.update` · `group-participants.update` · `group.join-request` · `group.member-tag.update` · `call` · `labels.edit` · `labels.association` · `blocklist.set` · `blocklist.update` · `identity-change` · `newsletter.reaction` · `newsletter.view` · `newsletter-participants.update` · `newsletter-settings.update` · `newsletter-partnership.update` · `message-capping.update` · `chats.lock` · `settings.update` · `processing.error`
+
+#### 🔗 Connection & Credentials
+
+##### `connection.update`
+Connection state changed — `connecting`, `open`, `close`, QR codes and the disconnect reason arrive here.
+
+```ts
+sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
+    if (qr) console.log('scan this QR:', qr)
+    if (connection === 'close') console.log('closed:', lastDisconnect?.error)
+    if (connection === 'open') console.log('connected')
+})
+```
+
+##### `creds.update`
+Auth credentials changed. Persist them (this is what keeps you logged in between restarts).
+
+```ts
+const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys')
+sock.ev.on('creds.update', saveCreds)
+```
+
+#### 🕘 History Sync
+
+##### `messaging-history.set`
+History sync payload (chats, contacts, messages — newest first) delivered on connect and during syncs.
+
+```ts
+sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest, progress }) => {
+    console.log(`history: ${chats.length} chats, ${messages.length} messages (${progress}%${isLatest ? ', latest' : ''})`)
+})
+```
+
+##### `messaging-history.status`
+A history sync phase completed (`explicit: true`) or stalled and was inferred complete (`explicit: false`).
+
+```ts
+sock.ev.on('messaging-history.status', ({ syncType, status, explicit }) => {
+    console.log(`history sync ${syncType}: ${status}${explicit ? '' : ' (inferred)'}`)
+})
+```
+
+#### 💬 Chats & Contacts
+
+##### `chats.upsert`
+New chats appeared (first message, group joined, history sync).
+
+```ts
+sock.ev.on('chats.upsert', (chats) => {
+    for (const chat of chats) console.log('new chat:', chat.id, chat.name)
+})
+```
+
+##### `chats.update`
+Existing chats changed — unread count, archive/pin/mute state, last message, name.
+
+```ts
+sock.ev.on('chats.update', (updates) => {
+    for (const { id, unreadCount, archive } of updates) {
+        console.log(`chat ${id}: unread=${unreadCount} archived=${archive}`)
+    }
+})
+```
+
+##### `chats.delete`
+Chats were deleted (array of chat JIDs).
+
+```ts
+sock.ev.on('chats.delete', (ids) => console.log('deleted chats:', ids))
+```
+
+##### `lid-mapping.update`
+A phone-number ↔ LID pairing was learned. Useful to keep your own identity map in sync.
+
+```ts
+sock.ev.on('lid-mapping.update', ({ lid, pn }) => {
+    console.log(`identity learned: ${pn} ↔ ${lid}`)
+})
+```
+
+##### `contacts.upsert`
+New contacts (from history sync or phone book sync).
+
+```ts
+sock.ev.on('contacts.upsert', (contacts) => {
+    for (const c of contacts) console.log('contact:', c.id, c.name || c.notify)
+})
+```
+
+##### `contacts.update`
+Contacts changed — name, profile picture URL, phone number.
+
+```ts
+sock.ev.on('contacts.update', (updates) => {
+    for (const { id, imgUrl } of updates) console.log(`contact ${id} picture: ${imgUrl}`)
+})
+```
+
+##### `presence.update`
+Someone started/stopped typing, or came online / went offline in a chat.
+
+```ts
+sock.ev.on('presence.update', ({ id, presences }) => {
+    for (const [participant, presence] of Object.entries(presences)) {
+        console.log(`${participant} in ${id}: ${presence.lastKnownPresence}`)
+    }
+})
+```
+
+#### ✉️ Messages
+
+##### `messages.upsert`
+New messages. `type: 'notify'` = live, `'append'` = history/offline sync or your own messages from another device.
+
+```ts
+sock.ev.on('messages.upsert', ({ messages, type }) => {
+    for (const msg of messages) {
+        if (!msg.message) continue
+        console.log(`[${type}] ${msg.key.remoteJid}:`, msg.message.conversation || '<non-text>')
+    }
+})
+```
+
+##### `messages.update`
+Message state changed — delivery status, edits, poll results. Encrypted message edits surface here too (`update.editedMessage`).
+
+```ts
+sock.ev.on('messages.update', (updates) => {
+    for (const { key, update } of updates) {
+        if (update.status) console.log(`${key.id} status -> ${update.status}`)
+        if (update.editedMessage) console.log(`${key.id} edited`)
+    }
+})
+```
+
+##### `messages.delete`
+Messages were deleted — either specific keys, or a whole chat (`{ jid, all: true }`).
+
+```ts
+sock.ev.on('messages.delete', (item) => {
+    if ('all' in item) console.log('all messages deleted in', item.jid)
+    else console.log('deleted:', item.keys.map(k => k.id))
+})
+```
+
+##### `messages.media-update`
+Media re-upload results for messages whose media expired (success carries fresh `media`, failure carries `error`).
+
+```ts
+sock.ev.on('messages.media-update', (updates) => {
+    for (const { key, media, error } of updates) {
+        console.log(`media for ${key.id}:`, error ? `failed (${error.message})` : 're-uploaded')
+    }
+})
+```
+
+##### `messages.reaction`
+A reaction was added (`reaction.text` set) or removed (`reaction.text` empty).
+
+```ts
+sock.ev.on('messages.reaction', (reactions) => {
+    for (const { key, reaction } of reactions) {
+        console.log(`reaction ${reaction.text || '<removed>'} on ${key.id}`)
+    }
+})
+```
+
+##### `message-receipt.update`
+Delivery/read receipts per user (in groups: per participant).
+
+```ts
+sock.ev.on('message-receipt.update', (updates) => {
+    for (const { key, receipt } of updates) {
+        console.log(`${key.id}: ${receipt.userJid} -> ${receipt.status}`)
+    }
+})
+```
+
+#### 👥 Groups
+
+##### `groups.upsert`
+New groups (created, joined, or from history sync) with full metadata.
+
+```ts
+sock.ev.on('groups.upsert', (groups) => {
+    for (const g of groups) console.log('group:', g.id, g.subject, `(${g.participants.length} members)`)
+})
+```
+
+##### `groups.update`
+Group metadata changed (subject, description, settings, announce/restrict…).
+
+```ts
+sock.ev.on('groups.update', (updates) => {
+    for (const { id, subject } of updates) {
+        if (subject) console.log(`group ${id} renamed to ${subject}`)
+    }
+})
+```
+
+##### `group-participants.update`
+Participants added, removed, promoted or demoted (`action: 'add' | 'remove' | 'promote' | 'demote'`).
+
+```ts
+sock.ev.on('group-participants.update', ({ id, author, participants, action }) => {
+    console.log(`${action} in ${id} by ${author}:`, participants.map(p => p.id))
+})
+```
+
+##### `group.join-request`
+Someone requested to join (or a request was approved/rejected) in a group with join approval on.
+
+```ts
+sock.ev.on('group.join-request', ({ id, participant, action }) => {
+    console.log(`join request ${action}: ${participant} -> ${id}`)
+    // approve with: await sock.groupRequestParticipantsUpdate(id, [participant], 'approve')
+})
+```
+
+##### `group.member-tag.update`
+A participant's member label (tag) in a group changed.
+
+```ts
+sock.ev.on('group.member-tag.update', ({ groupId, participant, label }) => {
+    console.log(`${participant} in ${groupId} is now tagged: ${label}`)
+})
+```
+
+#### 📞 Calls
+
+##### `call`
+Call signalling updates (`status: 'offer' | 'ringing' | 'preaccept' | 'accept' | 'reject' | 'terminate' | 'timeout' | …`). Signalling only — carrying call audio needs a media engine; see [VOIP-ADOPTION-PLAN.md](./VOIP-ADOPTION-PLAN.md).
+
+```ts
+sock.ev.on('call', async ([call]) => {
+    console.log(`call ${call.id} from ${call.from}: ${call.status}${call.isVideo ? ' (video)' : ''}`)
+    if (call.status === 'offer') await sock.rejectCall(call.id, call.from) // or acceptCall / terminateCall
+})
+```
+
+#### 🏷️ Labels
+
+##### `labels.edit`
+A label (WhatsApp Business labels) was created, edited or deleted.
+
+```ts
+sock.ev.on('labels.edit', (label) => console.log('label:', label.id, label.name, label.color))
+```
+
+##### `labels.association`
+A label was attached to or removed from a chat/message.
+
+```ts
+sock.ev.on('labels.association', ({ association, type }) => {
+    console.log(`label ${type}:`, association)
+})
+```
+
+#### 🚫 Blocklist
+
+##### `blocklist.set`
+Full blocklist replaced. Declared in `BaileysEventMap`; note that in Baileys-X today `fetchBlocklist()` returns the list without emitting, so listen to `blocklist.update` for live changes.
+
+```ts
+sock.ev.on('blocklist.set', ({ blocklist }) => console.log('blocklist:', blocklist))
+```
+
+##### `blocklist.update`
+A user was blocked or unblocked.
+
+```ts
+sock.ev.on('blocklist.update', ({ blocklist, type }) => {
+    console.log(`${type === 'add' ? 'blocked' : 'unblocked'}:`, blocklist)
+})
+```
+
+#### 👤 Identity
+
+##### `identity-change`
+A contact's identity migrated (phone number ↔ LID), or your own identity changed (`me: true`). Re-resolve cached JIDs when you see this.
+
+```ts
+sock.ev.on('identity-change', ({ jid, me }) => {
+    console.log(`${me ? 'own' : 'contact'} identity changed: ${jid}`)
+})
+```
+
+#### 📣 Newsletters (Channels)
+
+##### `newsletter.reaction`
+Reaction counts changed on a channel post.
+
+```ts
+sock.ev.on('newsletter.reaction', ({ id, server_id, reaction }) => {
+    console.log(`channel ${id} post ${server_id}: ${reaction.code} x${reaction.count}`)
+})
+```
+
+##### `newsletter.view`
+View count updated on a channel post.
+
+```ts
+sock.ev.on('newsletter.view', ({ id, server_id, count }) => {
+    console.log(`channel ${id} post ${server_id}: ${count} views`)
+})
+```
+
+##### `newsletter-participants.update`
+A channel follower's role changed (subscriber/admin actions).
+
+```ts
+sock.ev.on('newsletter-participants.update', ({ id, user, new_role, action }) => {
+    console.log(`channel ${id}: ${user} ${action} -> ${new_role}`)
+})
+```
+
+##### `newsletter-settings.update`
+Channel settings (name, description, picture, reaction mode…) changed.
+
+```ts
+sock.ev.on('newsletter-settings.update', ({ id, update }) => {
+    console.log(`channel ${id} settings updated:`, update)
+})
+```
+
+##### `newsletter-partnership.update`
+A channel entered or left a paid partnership (server message id of the notice included).
+
+```ts
+sock.ev.on('newsletter-partnership.update', ({ id, server_id }) => {
+    console.log(`channel ${id} partnership update (server_id ${server_id})`)
+})
+```
+
+#### ⚙️ Settings & Limits
+
+##### `message-capping.update`
+WhatsApp's per-chat message cap info changed (limits that apply before you can message a chat again).
+
+```ts
+sock.ev.on('message-capping.update', (info) => console.log('message capping update:', info))
+```
+
+##### `chats.lock`
+A chat was locked or unlocked (chat lock / fingerprint-protected chats).
+
+```ts
+sock.ev.on('chats.lock', ({ id, locked }) => console.log(`chat ${id} ${locked ? 'locked' : 'unlocked'}`))
+```
+
+##### `settings.update`
+An account setting synced from another device (locale, privacy settings, status privacy, link previews…).
+
+```ts
+sock.ev.on('settings.update', ({ setting, value }) => {
+    console.log(`setting ${setting} changed:`, value)
+})
+```
+
+#### 🔥 Errors
+
+##### `processing.error`
+An unexpected error was swallowed while processing a stanza or internal task. It is still written to the logs — this event lets you count or alert on failures live.
+
+```ts
+sock.ev.on('processing.error', ({ error, context }) => {
+    console.error(`processing failed during '${context}':`, error)
 })
 ```
 
@@ -1106,7 +1487,8 @@ await sock.rejectCall(callId, callFrom)
 
 - Baileys handles call signaling only. Placing calls needs a media engine (WASM, SRTP, Opus);
   see [CALLING.md](./CALLING.md) for the evaluation of `baileys-caller` and how to run it
-  alongside Baileys-X.
+  alongside Baileys-X, and [VOIP-ADOPTION-PLAN.md](./VOIP-ADOPTION-PLAN.md) for the
+  comprehensive plan to adopt the pure-TypeScript `baileys-voip` engine.
 
 ## Send States in Chat
 
