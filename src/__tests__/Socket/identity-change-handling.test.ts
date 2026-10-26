@@ -296,9 +296,9 @@ describe('Identity Change Handling', () => {
 		})
 
 		it('a throwing callback does not break session refresh', async () => {
-			const onParticipantIdentityChange = jest
-				.fn<IdentityChangeCallback>()
-				.mockRejectedValue(new Error('listener boom'))
+			const onParticipantIdentityChange = jest.fn<IdentityChangeCallback>().mockImplementation(async () => {
+				throw new Error('listener boom')
+			})
 			mockValidateSession.mockResolvedValue({ exists: true })
 
 			const result = await handleIdentityChange(createIdentityChangeNode('user@s.whatsapp.net'), {
