@@ -2009,7 +2009,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 				await upsertMessage(msg, isOfflineNode(node) ? 'append' : 'notify')
 			})
 		} catch (error) {
-			logger.error({ error, node: binaryNodeToString(node) }, 'error in handling message')
+			onUnexpectedError(error as Error, 'handling message')
 			if (!acked) {
 				await sendMessageAck(node, NACK_REASONS.UnhandledError).catch(ackErr =>
 					logger.error({ ackErr }, 'failed to ack message after error')
@@ -2073,7 +2073,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 			ev.emit('call', [call])
 		} catch (error) {
-			logger.error({ error, node: binaryNodeToString(node) }, 'error in handling call')
+			onUnexpectedError(error as Error, 'handling call')
 		} finally {
 			await sendMessageAck(node).catch(ackErr => logger.error({ ackErr }, 'failed to ack call'))
 		}
