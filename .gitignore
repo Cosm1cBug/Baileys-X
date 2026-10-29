@@ -16,6 +16,9 @@ docs/*
 !docs/404.html
 !docs/.nojekyll
 lib
+# …but the vendored VoIP engine's source dir is not build output
+!src/VoIP/lib/
+!src/VoIP/lib/**
 messages*.json
 node_modules
 output.csv
