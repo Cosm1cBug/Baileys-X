@@ -38,7 +38,7 @@ const hkdfExtract = (salt: Buffer, ikm: Buffer): Buffer =>
 
 const hkdfExpand = (prk: Buffer, info: Buffer, length: number): Buffer => {
   const out = Buffer.alloc(length);
-  let block = Buffer.alloc(0);
+  let block: Buffer = Buffer.alloc(0);
   let pos = 0;
   let counter = 1;
   while (pos < length) {
