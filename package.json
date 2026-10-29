@@ -23,7 +23,7 @@
   "scripts": {
     "build:all": "npm run build && npm run build:docs",
     "build:docs": "typedoc",
-    "build": "tsc -P tsconfig.build.json && tsc-esm-fix --tsconfig=tsconfig.build.json --ext=.js",
+    "build": "tsc -P tsconfig.build.json && tsc-esm-fix --tsconfig=tsconfig.build.json --ext=.js && node scripts/copy-voip-assets.mjs",
     "changelog:last": "conventional-changelog -p angular -r 2",
     "changelog:preview": "conventional-changelog -p angular -u",
     "changelog:update": "conventional-changelog -p angular -i CHANGELOG.md -s -r 0",
@@ -87,6 +87,7 @@
     "typescript": "^5.8.2"
   },
   "peerDependencies": {
+    "@roamhq/wrtc": "^0.10.0",
     "audio-decode": "^2.1.3",
     "jimp": "^1.6.1",
     "link-preview-js": "^3.0.0",
@@ -122,6 +123,9 @@
     "yaml@npm:^2.6.1": "^2.8.4"
   },
   "peerDependenciesMeta": {
+    "@roamhq/wrtc": {
+      "optional": true
+    },
     "audio-decode": {
       "optional": true
     },
