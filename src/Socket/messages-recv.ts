@@ -2039,7 +2039,8 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 				id: callId,
 				date: new Date(+attrs.t! * 1000),
 				offline: isOfflineNode(node),
-				status
+				status,
+				rawNode: infoChild
 			}
 
 			if (status === 'relaylatency') {

@@ -17,6 +17,10 @@ const compat = new FlatCompat({
 
 export default defineConfig([globalIgnores([
     "src/Tests/*",
+    // vendored WhatsApp VoIP engine (see src/VoIP) — third-party code kept
+    // verbatim; typechecked by tsc but exempt from fork lint style
+    "src/VoIP/lib/**",
+    "src/VoIP/vendor/**",
     "**/lib",
     "**/coverage",
     "**/*.lock",

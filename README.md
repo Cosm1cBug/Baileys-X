@@ -609,7 +609,7 @@ sock.ev.on('group.member-tag.update', ({ groupId, participant, label }) => {
 #### 📞 Calls
 
 ##### `call`
-Call signalling updates (`status: 'offer' | 'ringing' | 'preaccept' | 'accept' | 'reject' | 'terminate' | 'timeout' | …`). Signalling only — carrying call audio needs a media engine; see [VOIP-ADOPTION-PLAN.md](./VOIP-ADOPTION-PLAN.md).
+Call signalling updates (`status: 'offer' | 'ringing' | 'preaccept' | 'accept' | 'reject' | 'terminate' | 'timeout' | …`). Signalling only — carrying call audio needs a media engine (see Voice Calling below).
 
 ```ts
 sock.ev.on('call', async ([call]) => {
@@ -1485,10 +1485,110 @@ await sock.rejectCall(callId, callFrom)
 
 ## Voice Calling
 
-- Baileys handles call signaling only. Placing calls needs a media engine (WASM, SRTP, Opus);
-  see [CALLING.md](./CALLING.md) for the evaluation of `baileys-caller` and how to run it
-  alongside Baileys-X, and [VOIP-ADOPTION-PLAN.md](./VOIP-ADOPTION-PLAN.md) for the
-  comprehensive plan to adopt the pure-TypeScript `baileys-voip` engine.
+Baileys-X ships a complete WhatsApp voice-calling engine in-tree
+(`src/VoIP`), adopted from
+[baileys-voip](https://github.com/SheIITear/baileys-voip) and rewired onto
+Baileys-X's own LID/session machinery. The core socket stays exactly as
+light as before — calling is a deep import, and chat-only users install
+nothing extra.
+
+**What you get**
+
+- Place real 1:1 voice calls with end-to-end encrypted call keys
+  (Signal per-device `<enc>`), SRTP media, and WhatsApp relay transport
+- In-call signaling (accept / preaccept / terminate / reject) fed to the
+  engine automatically
+- Peer audio decoded to Float32 PCM (16 kHz mono) for playback, recording,
+  or piping into speech pipelines
+- The vendored MLow codec (WASM) and WARP/SRTP/SFrame protocol layers,
+  exported for lower-level use
+
+**Requirements**
+
+- A system `ffmpeg` binary on `PATH` (audio decode/encode)
+- For the default WebRTC relay transport: the optional peer dependency
+  `@roamhq/wrtc` — install it only if you make calls:
+
+```bash
+npm install @roamhq/wrtc   # or: yarn add @roamhq/wrtc
+```
+
+### Place a call
+
+Call `attachCalling` once the connection is open (your LID is required):
+
+```ts
+import { attachCalling } from 'baileys/lib/VoIP/index.js'
+
+sock.ev.on('connection.update', async ({ connection }) => {
+    if (connection !== 'open') return
+
+    const calling = await attachCalling(sock, {
+        // ffmpeg can decode this: a file, an `lavfi:` spec, a device URI…
+        audioSource: 'audio/hello.mp3',
+        onAudio: samples => {
+            // Float32Array of peer speech @ 16 kHz — play it, save it,
+            // or feed it to your ASR/TTS pipeline
+        },
+        onLog: (level, msg) => console.log(`[voip:${level}]`, msg)
+    })
+
+    const callId = await calling.placeCall('15551234567') // digits or PN JID
+    // …later:
+    await calling.endCall(callId)
+    calling.detach() // stop listening & destroy the engine
+})
+```
+
+Options:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `audioSource` | `lavfi:sine=frequency=440` | Audio streamed to the peer (any ffmpeg input) |
+| `transport` | `'rtc'` | `'rtc'` = WebRTC DataChannel relay (needs `@roamhq/wrtc`); `'udp'` = raw UDP, testing only |
+| `onAudio` | — | Decoded peer audio callback |
+| `onLog` | silent | Engine/transport logs |
+| `onCallNode` | — | Every inbound `<call>` child node (offers included) |
+
+The handle also exposes `calling.voip` (the engine itself — stats, SSRCs,
+group/SFrame layers) and `calling.feedCallNode(node)` to inject stanzas
+manually. Everything is also exported individually from
+`baileys/lib/VoIP/index.js` (`WhatsAppVoipNode`, `buildOfferStanza`,
+`extractOfferEnc`, SRTP/WARP helpers, …).
+
+### Incoming calls
+
+Every inbound stanza is reported twice:
+
+- `sock.ev.on('call')` — the friendly parsed event; `call.rawNode` now
+  carries the full signaling node (including the `<enc>` call key and
+  `<relay>` children the parsed fields don't model)
+- `onCallNode(child, callNode)` on the calling handle — sees offers plus
+  every in-call stanza as it arrives
+
+Stanzas for calls **you** placed (accept, preaccept, terminate, …) are fed
+to the engine automatically. Answering an incoming offer is deliberately
+left to you — the pieces are exported:
+
+```ts
+import { extractOfferEnc, decryptInboundCallKey, parseInboundOfferLid } from 'baileys/lib/VoIP/index.js'
+
+onCallNode: async (child, callNode) => {
+    if (child.tag !== 'offer') return
+    const myLidJid = sock.authState.creds.me.lid
+    const enc = extractOfferEnc(child.content as BinaryNode[], myLidJid)
+    const callKey = enc && (await decryptInboundCallKey(sock, enc, parseInboundOfferLid(child)))
+    if (!callKey) return // not addressed to us / undecryptable
+    calling.voip.setE2ECallKey(callKey, myLidJid, parseInboundOfferLid(child))
+    calling.feedCallNode(callNode) // engine now tracks the call
+    await sock.acceptCall(child.attrs['call-id'], child.attrs['call-creator'])
+}
+```
+
+> ⚠️ Calling is unofficial-client protocol work: it can break as WhatsApp
+> changes its VoIP stack, and misuse can get numbers banned. The engine has
+> no upstream test suite — Baileys-X unit-tests the protocol pieces and
+> glue, but only ever verify calls with your own test numbers.
 
 ## Send States in Chat
 
@@ -2074,8 +2174,8 @@ const entities = Toolkit.extractIE('Hello **world**')
 
 ### Call Signalling
 
-Accept or terminate incoming calls (signalling only — media needs an external
-engine, see [CALLING.md](./CALLING.md)):
+Accept or terminate incoming calls (signalling only — for full call media
+use the built-in engine, see [Voice Calling](#voice-calling)):
 
 ```ts
 sock.ev.on('call', async ([call]) => {
