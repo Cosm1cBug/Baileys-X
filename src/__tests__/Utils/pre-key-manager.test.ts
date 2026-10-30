@@ -24,12 +24,13 @@ const makeStore = (existing: Record<string, unknown> = {}) =>
 					out[id] = existing[id]
 				}
 			}
+
 			return out
 		}),
 		set: jest.fn(async () => undefined)
 	}) as unknown as SignalKeyStore & { get: jest.Mock }
 
-const emptySet = (): SignalDataSet => ({}) as SignalDataSet
+const emptySet = (): SignalDataSet => ({})
 
 describe('PreKeyManager concurrency', () => {
 	beforeEach(() => {
@@ -72,13 +73,7 @@ describe('PreKeyManager concurrency', () => {
 				mutations,
 				false
 			),
-			manager.processOperations(
-				{ 'pre-key': { 'id-1': null } } as unknown as SignalDataSet,
-				'pre-key',
-				cache,
-				mutations,
-				false
-			),
+			manager.processOperations({ 'pre-key': { 'id-1': null } }, 'pre-key', cache, mutations, false),
 			manager.processOperations(
 				{ 'pre-key': { 'id-1': { key: 'v2' } } } as unknown as SignalDataSet,
 				'pre-key',
@@ -98,13 +93,7 @@ describe('PreKeyManager concurrency', () => {
 		const cache = emptySet()
 		const mutations = emptySet()
 
-		await manager.processOperations(
-			{ 'pre-key': { ghost: null } } as unknown as SignalDataSet,
-			'pre-key',
-			cache,
-			mutations,
-			false
-		)
+		await manager.processOperations({ 'pre-key': { ghost: null } }, 'pre-key', cache, mutations, false)
 
 		expect(cache['pre-key']!['ghost']).toBeUndefined()
 		expect(mutations['pre-key']!['ghost']).toBeUndefined()
@@ -116,13 +105,7 @@ describe('PreKeyManager concurrency', () => {
 		const cache = { 'pre-key': { kept: { key: 1 } } } as unknown as SignalDataSet
 		const mutations = emptySet()
 
-		await manager.processOperations(
-			{ 'pre-key': { kept: null, ghost: null } } as unknown as SignalDataSet,
-			'pre-key',
-			cache,
-			mutations,
-			true
-		)
+		await manager.processOperations({ 'pre-key': { kept: null, ghost: null } }, 'pre-key', cache, mutations, true)
 
 		expect(cache['pre-key']!['kept']).toBeNull()
 		expect(mutations['pre-key']!['kept']).toBeNull()

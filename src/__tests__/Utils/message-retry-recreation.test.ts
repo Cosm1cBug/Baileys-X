@@ -15,7 +15,6 @@ const makeLogger = (): ILogger =>
 	}) as unknown as ILogger
 
 const JID = '1234567890@s.whatsapp.net'
-const HOUR = 60 * 60 * 1000
 
 describe('MessageRetryManager.parseRetryErrorCode', () => {
 	const manager = new MessageRetryManager(makeLogger(), 5)
@@ -112,9 +111,9 @@ describe('MessageRetryManager.shouldRecreateSession', () => {
 		expect(manager.shouldRecreateSession(JID, true, RetryReason.SignalErrorFutureMessage).recreate).toBe(true)
 		expect(manager.shouldRecreateSession(JID, true, RetryReason.SignalErrorFutureMessage).recreate).toBe(false)
 		// a different JID has its own window
-		expect(manager.shouldRecreateSession('other@s.whatsapp.net', true, RetryReason.SignalErrorFutureMessage).recreate).toBe(
-			true
-		)
+		expect(
+			manager.shouldRecreateSession('other@s.whatsapp.net', true, RetryReason.SignalErrorFutureMessage).recreate
+		).toBe(true)
 	})
 })
 

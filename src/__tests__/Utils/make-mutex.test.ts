@@ -112,9 +112,7 @@ describe('makeKeyedMutex', () => {
 
 	it('survives many one-shot keys (entries are cleaned up, later keys unaffected)', async () => {
 		const { mutex } = makeKeyedMutex()
-		const results = await Promise.all(
-			Array.from({ length: 200 }, (_, i) => mutex(`key-${i}`, async () => i * 2))
-		)
+		const results = await Promise.all(Array.from({ length: 200 }, (_, i) => mutex(`key-${i}`, async () => i * 2)))
 		expect(results).toEqual(Array.from({ length: 200 }, (_, i) => i * 2))
 
 		// a previously used key still works after its entry was evicted

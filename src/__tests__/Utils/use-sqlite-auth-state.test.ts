@@ -52,7 +52,7 @@ describeSqlite('useSQLiteAuthState', () => {
 				b: { v: 2 }
 			})
 
-			await state.keys.set({ session: { a: null } } as never)
+			await state.keys.set({ session: { a: null } })
 			expect(await state.keys.get('session', ['a', 'b'])).toEqual({ b: { v: 2 } })
 		} finally {
 			close()
@@ -84,9 +84,7 @@ describeSqlite('useSQLiteAuthState', () => {
 			// a value whose serialization explodes mid-transaction
 			const circular: Record<string, unknown> = {}
 			circular.self = circular
-			expect(() => state.keys.set({ session: { fresh: { v: 2 }, boom: circular } } as never)).toThrow(
-				/circular/i
-			)
+			expect(() => state.keys.set({ session: { fresh: { v: 2 }, boom: circular } } as never)).toThrow(/circular/i)
 
 			// neither key from the failed batch landed; prior state intact
 			expect(await state.keys.get('session', ['keep', 'fresh'])).toEqual({ keep: { v: 1 } })

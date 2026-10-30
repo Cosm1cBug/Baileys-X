@@ -99,9 +99,7 @@ export const useSQLiteAuthState = async (
 	const rollback = db.prepare('ROLLBACK')
 
 	const credsRow = credsGet.get(CREDS_KEY) as { value: string } | undefined
-	const creds: AuthenticationCreds = credsRow
-		? JSON.parse(credsRow.value, BufferJSON.reviver)
-		: initAuthCreds()
+	const creds: AuthenticationCreds = credsRow ? JSON.parse(credsRow.value, BufferJSON.reviver) : initAuthCreds()
 	let lastSavedCreds = credsRow?.value
 
 	return {

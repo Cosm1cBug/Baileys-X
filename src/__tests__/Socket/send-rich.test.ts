@@ -112,9 +112,7 @@ describe('sendRichTable / sendRichCode', () => {
 
 	it('sendRichTable rejects fewer than two rows', async () => {
 		await withSock(async sock => {
-			await expect(sock.sendRichTable(targetJid, [['only-a-header']])).rejects.toThrow(
-				'at least a header row'
-			)
+			await expect(sock.sendRichTable(targetJid, [['only-a-header']])).rejects.toThrow('at least a header row')
 		})
 	})
 

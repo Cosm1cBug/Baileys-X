@@ -47,8 +47,8 @@ import {
 	setNewsletterMediaHandle,
 	toBuffer
 } from './messages-media'
-import { createStoredZip } from './zip-store'
 import { shouldIncludeReportingToken } from './reporting-utils'
+import { createStoredZip } from './zip-store'
 
 type ExtractByKey<T, K extends PropertyKey> = T extends Record<K, any> ? T : never
 type RequireKey<T, K extends keyof T> = T & {
