@@ -105,7 +105,8 @@ export const MEDIA_PATH_MAP: { [T in MediaType]?: string } = {
 	'product-catalog-image': '/product/image',
 	'md-app-state': '',
 	'md-msg-hist': '/mms/md-app-state',
-	'biz-cover-photo': '/pps/biz-cover-photo'
+	'biz-cover-photo': '/pps/biz-cover-photo',
+	'sticker-pack': '/mms/sticker'
 }
 
 export const NEWSLETTER_MEDIA_PATH_MAP: { [T in MediaType]?: string } = {
@@ -136,7 +137,8 @@ export const MEDIA_HKDF_KEY_MAPPING = {
 	'product-catalog-image': '',
 	'payment-bg-image': 'Payment Background',
 	ptv: 'Video',
-	'biz-cover-photo': 'Image'
+	'biz-cover-photo': 'Image',
+	'sticker-pack': 'Sticker Pack'
 }
 
 export type MediaType = keyof typeof MEDIA_HKDF_KEY_MAPPING

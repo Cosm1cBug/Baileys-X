@@ -37,6 +37,21 @@ if (sharpResolvable) {
 	jest.unstable_mockModule('sharp', () => ({}))
 }
 
+// same for the optional @napi-rs/image backend: where it is installed it
+// would otherwise provide a real library and break the fallback premise
+const napiImageResolvable = (() => {
+	try {
+		createRequire(import.meta.url).resolve('@napi-rs/image')
+		return true
+	} catch {
+		return false
+	}
+})()
+
+if (napiImageResolvable) {
+	jest.unstable_mockModule('@napi-rs/image', () => ({}))
+}
+
 const { extractImageThumb, generateThumbnail, getImageDimensions, getMediaKeys } = await import(
 	'../../Utils/messages-media'
 )

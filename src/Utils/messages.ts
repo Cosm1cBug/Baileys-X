@@ -42,10 +42,13 @@ import {
 	getAudioDuration,
 	getAudioWaveform,
 	getRawMediaUploadData,
+	getStream,
 	type MediaDownloadOptions,
-	setNewsletterMediaHandle
+	setNewsletterMediaHandle,
+	toBuffer
 } from './messages-media'
 import { shouldIncludeReportingToken } from './reporting-utils'
+import { createStoredZip } from './zip-store'
 
 type ExtractByKey<T, K extends PropertyKey> = T extends Record<K, any> ? T : never
 type RequireKey<T, K extends keyof T> = T & {
@@ -837,6 +840,70 @@ export const generateWAMessageContent = async (
 				expectedImageCount: message.album.expectedImageCount,
 				expectedVideoCount: message.album.expectedVideoCount
 			}
+		}
+	} else if (hasNonNullishProperty(message, 'stickerPack')) {
+		const { stickers, cover, name, publisher, packId, description } = message.stickerPack
+		if (!Array.isArray(stickers) || stickers.length === 0) {
+			throw new Boom('Provide at least 1 sticker for a sticker pack', { statusCode: 400 })
+		}
+
+		// pack every sticker into one stored-ZIP; each file is named by its
+		// content hash like the official client's pack bundles
+		const stickerMetadata = await Promise.all(
+			stickers.map(async (s, i) => {
+				const { stream } = await getStream(s.sticker, options.options)
+				const buffer = await toBuffer(stream)
+				const fileName = `${i.toString().padStart(2, '0')}_${sha256(buffer).toString('base64url')}.webp`
+				return {
+					meta: {
+						fileName,
+						mimetype: 'image/webp',
+						isAnimated: s.isAnimated || false,
+						isLottie: s.isLottie || false,
+						emojis: s.emojis || [],
+						accessibilityLabel: s.accessibilityLabel || ''
+					},
+					entry: { name: fileName, data: buffer }
+				}
+			})
+		)
+		const zipBuffer = createStoredZip(stickerMetadata.map(s => s.entry))
+
+		const coverBuffer = await toBuffer((await getStream(cover, options.options)).stream)
+		const [packUpload, coverUpload] = await Promise.all([
+			encryptedStream(zipBuffer, 'sticker-pack', { logger: options.logger, opts: options.options }),
+			prepareWAMessageMedia({ image: coverBuffer }, { ...options, mediaTypeOverride: 'image' })
+		])
+
+		const packUploadResult = await options.upload(packUpload.encFilePath, {
+			fileEncSha256B64: packUpload.fileEncSha256.toString('base64'),
+			mediaType: 'sticker-pack',
+			timeoutMs: options.mediaUploadTimeoutMs
+		})
+
+		const coverImage = coverUpload.imageMessage!
+		const stickerPackId = packId || generateMessageIDV2()
+		m.stickerPackMessage = {
+			name,
+			publisher,
+			stickerPackId,
+			packDescription: description,
+			stickerPackOrigin: proto.Message.StickerPackMessage.StickerPackOrigin.THIRD_PARTY,
+			stickerPackSize: packUpload.fileLength,
+			stickers: stickerMetadata.map(s => s.meta),
+			fileSha256: packUpload.fileSha256,
+			fileEncSha256: packUpload.fileEncSha256,
+			mediaKey: packUpload.mediaKey,
+			directPath: packUploadResult.directPath,
+			fileLength: packUpload.fileLength,
+			mediaKeyTimestamp: unixTimestampSeconds(),
+			trayIconFileName: `${stickerPackId}.png`,
+			imageDataHash: sha256(coverBuffer).toString('base64'),
+			thumbnailDirectPath: coverImage.directPath,
+			thumbnailSha256: coverImage.fileSha256,
+			thumbnailEncSha256: coverImage.fileEncSha256,
+			thumbnailHeight: coverImage.height,
+			thumbnailWidth: coverImage.width
 		}
 	} else if (hasNonNullishProperty(message, 'sharePhoneNumber')) {
 		m.protocolMessage = {

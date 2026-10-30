@@ -69,6 +69,29 @@ Then import your code using:
 import makeWASocket from '@whiskeysockets/baileys'
 ```
 
+> [!NOTE]
+> Baileys-X is ESM-first. CommonJS consumers on **Node ≥ 20.19 or ≥ 22.12**
+> can still `require()` the built package (including
+> `require('baileys/lib/VoIP/index.js')`) thanks to Node's require-ESM
+> support — this is smoke-tested in CI on every build.
+
+## Dependencies & Trust
+
+This library holds your WhatsApp credentials and Signal encryption keys,
+so its supply chain is deliberately boring:
+
+- **Signal stack:** the official `libsignal` package and upstream
+  `whatsapp-rust-bridge` — never renamed third-party signal forks.
+- **Optional peers only:** `sharp`, `@napi-rs/image`, `jimp`,
+  `link-preview-js`, `audio-decode` and `@roamhq/wrtc` (VoIP) are loaded
+  dynamically *only if you install them*; image handling falls back to a
+  built-in pure-TypeScript implementation without any of them.
+- **CI auditing:** every PR runs a dependency audit (`yarn npm audit`,
+  moderate and above) next to the build/lint/test gates.
+- **Your auth state is the crown jewels:** whichever store you use
+  (multi-file folder, SQLite file, your own database), protect it like a
+  password — anyone holding it can impersonate the account.
+
 # Links
 
 - [Discord](https://discord.gg/WeJM5FP9GG)
@@ -341,6 +364,17 @@ sock.ev.on('creds.update', saveCreds)
 
 > [!IMPORTANT]
 > `useMultiFileAuthState` is a utility function to help save the auth state in a single folder, this function serves as a good guide to help write auth & key states for SQL/no-SQL databases, which I would recommend in any production grade system.
+
+On Node ≥ 22.5 you can instead keep everything in one SQLite file with
+zero extra dependencies (built-in `node:sqlite`, transactional writes):
+
+```ts
+import makeWASocket, { useSQLiteAuthState } from '@whiskeysockets/baileys'
+
+const { state, saveCreds } = await useSQLiteAuthState('auth.db')
+const sock = makeWASocket({ auth: state })
+sock.ev.on('creds.update', saveCreds)
+```
 
 > [!NOTE]
 > When a message is received/sent, due to signal sessions needing updating, the auth keys (`authState.keys`) will update. Whenever that happens, you must save the updated keys (`authState.keys.set()` is called). Not doing so will prevent your messages from reaching the recipient & cause other unexpected consequences. The `useMultiFileAuthState` function automatically takes care of that, but for any other serious implementation -- you will need to be very careful with the key state management.
@@ -2089,6 +2123,8 @@ detail in the sections above.
 | Forward / delete / edit | `{ forward: msg }`, `{ delete: msg.key }`, `{ text: 'fixed', edit: msg.key }` |
 | Raw protobuf † | `{ raw: { conversation: 'hand-built' } }` — bypasses the builders |
 | Rich / HTML † | via `AIRich` / `sock.sendHtml` — see Rich Responses below |
+| Rich table / code † | `sock.sendRichTable(jid, rows)` / `sock.sendRichCode(jid, code)` — see Rich Responses below |
+| Sticker pack † | `{ stickerPack: { name, publisher, cover, stickers: [{ sticker }] } }` |
 
 Common `options` for every send: `{ quoted: msg }`, `{ ephemeralExpiration: 86400 }`,
 `{ statusJidList: [...] }` (status audience), `{ delayMs: 1500 }` (albums/status batches).
@@ -2164,6 +2200,10 @@ await rich.send(sock, jid)
 // Raw HTML rendered through the rich-response HTML primitive (unofficial —
 // rendering depends on the recipient's client):
 await sock.sendHtml(jid, '<h1>Hello</h1><p>from Baileys-X</p>')
+
+// One-call sugar over the same AIRich engine:
+await sock.sendRichTable(jid, [['Name', 'Score'], ['Ada', '42'], ['Grace', '37']])
+await sock.sendRichCode(jid, 'const x: number = 1', { language: 'typescript' })
 
 // Native-flow "in-app signup" style message (falls back to plain text on iOS):
 await sock.sendInteractive(jid, 'Tap to continue', { title: 'Welcome' })

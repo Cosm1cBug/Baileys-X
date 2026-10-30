@@ -191,6 +191,27 @@ export type AlbumMessageOptions = {
 /** a single media item of an album */
 export type AlbumMediaContent = { image: WAMediaUpload; caption?: string } | { video: WAMediaUpload; caption?: string }
 
+/** one sticker inside a sticker pack (WebP image bytes or any readable upload source) */
+export type StickerPackSticker = {
+	sticker: WAMediaUpload
+	emojis?: string[]
+	isAnimated?: boolean
+	isLottie?: boolean
+	accessibilityLabel?: string
+}
+
+export type StickerPackOptions = {
+	/** at least one sticker; each is packed, encrypted and uploaded as a bundle */
+	stickers: StickerPackSticker[]
+	/** pack cover image (shown as the tray icon/thumbnail) */
+	cover: WAMediaUpload
+	name: string
+	publisher: string
+	/** generated when omitted */
+	packId?: string
+	description?: string
+}
+
 export type NativeFlowButton = {
 	text?: string
 	buttonText?: string
@@ -393,6 +414,7 @@ export type AnyRegularMessageContent = (
 			album: AlbumMessageOptions | AlbumMediaContent[]
 	  } & Contextable &
 			Mentionable)
+	| ({ stickerPack: StickerPackOptions } & Contextable)
 	| {
 			contacts: {
 				displayName?: string

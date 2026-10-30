@@ -38,11 +38,22 @@ import type { ILogger } from './logger'
 const getTmpFilesDirectory = () => tmpdir()
 
 const getImageProcessingLibrary = async () => {
-	//@ts-ignore
-	const [jimp, sharp] = await Promise.all([import('jimp').catch(() => {}), import('sharp').catch(() => {})])
+	const [jimp, sharp, napiImage] = await Promise.all([
+		//@ts-ignore optional peer, may be absent
+		import('jimp').catch(() => {}),
+		//@ts-ignore optional peer, may be absent
+		import('sharp').catch(() => {}),
+		//@ts-ignore optional peer, may be absent
+		import('@napi-rs/image').catch(() => {})
+	])
 
 	if (sharp) {
 		return { sharp }
+	}
+
+	// @napi-rs/image: native speed without sharp's footprint (optional peer)
+	if (napiImage && typeof napiImage.Transformer === 'function') {
+		return { napiImage }
 	}
 
 	if (jimp) {
@@ -238,6 +249,18 @@ export const extractImageThumb = async (bufferOrFilePath: Readable | Buffer | st
 				height: dimensions.height
 			}
 		}
+	} else if (lib && 'napiImage' in lib && typeof lib.napiImage?.Transformer === 'function') {
+		const bytes = Buffer.isBuffer(bufferOrFilePath) ? bufferOrFilePath : await fs.readFile(bufferOrFilePath)
+		const img = new lib.napiImage.Transformer(bytes)
+		const dimensions = await img.metadata()
+		const buffer = await img.resize(width, undefined, 0).jpeg(50)
+		return {
+			buffer,
+			original: {
+				width: dimensions.width,
+				height: dimensions.height
+			}
+		}
 	} else if (lib && 'jimp' in lib && typeof lib.jimp?.Jimp === 'object') {
 		const jimp = await (lib.jimp.Jimp as any).read(bufferOrFilePath)
 		const dimensions = {
@@ -310,6 +333,8 @@ export const generateProfilePicture = async (
 				quality: 50
 			})
 			.toBuffer()
+	} else if ('napiImage' in lib && typeof lib.napiImage?.Transformer === 'function') {
+		img = new lib.napiImage.Transformer(buffer).resize(w, h, 0).jpeg(50)
 	} else if ('jimp' in lib && typeof lib.jimp?.Jimp === 'function') {
 		const jimp = await (lib.jimp.Jimp as any).read(buffer)
 		const min = Math.min(jimp.width, jimp.height)

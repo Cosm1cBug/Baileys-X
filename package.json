@@ -87,6 +87,7 @@
     "typescript": "^5.8.2"
   },
   "peerDependencies": {
+    "@napi-rs/image": "^1.9.2",
     "@roamhq/wrtc": "^0.10.0",
     "audio-decode": "^2.1.3",
     "jimp": "^1.6.1",
@@ -123,6 +124,9 @@
     "yaml@npm:^2.6.1": "^2.8.4"
   },
   "peerDependenciesMeta": {
+    "@napi-rs/image": {
+      "optional": true
+    },
     "@roamhq/wrtc": {
       "optional": true
     },
