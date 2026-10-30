@@ -14,6 +14,7 @@ import type {
 } from '../Types'
 import {
 	aggregateMessageKeysNotFromMe,
+	AIRich,
 	assertMediaContent,
 	assertMeId,
 	bindWaitForEvent,
@@ -1452,6 +1453,54 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		return waMsg
 	}
 
+	type RichSendOptions = {
+		title?: string
+		/** markdown text rendered above the table/code block */
+		text?: string
+		footer?: string
+		quoted?: WAMessage
+		contextInfo?: proto.IContextInfo
+	}
+
+	/**
+	 * Send a table rendered through Meta AI's rich-response table primitive.
+	 * `rows[0]` is the header row. Thin sugar over the AIRich builder — for
+	 * anything richer (multiple blocks, sources, citations) build with
+	 * `new AIRich()` and relay `rich.build()` yourself.
+	 */
+	const sendRichTable = async (jid: string, rows: string[][], opts: RichSendOptions = {}) => {
+		if (!Array.isArray(rows) || rows.length < 2) {
+			throw new Boom('sendRichTable requires at least a header row and one data row', { statusCode: 400 })
+		}
+
+		const rich = new AIRich()
+		if (opts.title) rich.setTitle(opts.title)
+		if (opts.text) rich.addText(opts.text)
+		rich.addTable(rows)
+		if (opts.footer) rich.setFooter(opts.footer)
+		if (opts.contextInfo) rich.setContextInfo(opts.contextInfo)
+
+		const content = rich.build({ quoted: opts.quoted })
+		const waMsg = generateWAMessageFromContent(jid, content, { userJid: authState.creds.me!.id })
+		await relayMessage(jid, waMsg.message!, { messageId: waMsg.key.id! })
+		return waMsg
+	}
+
+	/** Send a syntax-highlighted code block through the rich-response code primitive. */
+	const sendRichCode = async (jid: string, code: string, opts: RichSendOptions & { language?: string } = {}) => {
+		const rich = new AIRich()
+		if (opts.title) rich.setTitle(opts.title)
+		if (opts.text) rich.addText(opts.text)
+		rich.addCode(opts.language || 'javascript', code)
+		if (opts.footer) rich.setFooter(opts.footer)
+		if (opts.contextInfo) rich.setContextInfo(opts.contextInfo)
+
+		const content = rich.build({ quoted: opts.quoted })
+		const waMsg = generateWAMessageFromContent(jid, content, { userJid: authState.creds.me!.id })
+		await relayMessage(jid, waMsg.message!, { messageId: waMsg.key.id! })
+		return waMsg
+	}
+
 	registerSocketEndHandler(() => {
 		if (!config.userDevicesCache && userDevicesCache.close) {
 			userDevicesCache.close()
@@ -1491,6 +1540,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		inappsignup: sendInteractive,
 		inapp_signup: sendInteractive,
 		sendHtml,
+		sendRichTable,
+		sendRichCode,
 		updateMediaMessage: async (message: WAMessage) => {
 			const content = assertMediaContent(message.message)
 			const mediaKey = content.mediaKey!
