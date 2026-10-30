@@ -105,6 +105,33 @@ describe('interactive message content', () => {
 		).rejects.toBeInstanceOf(Boom)
 	})
 
+	it('tags an album item with the MEDIA_ALBUM parent association', async () => {
+		const parentKey = { remoteJid: '123@g.us', fromMe: true, id: 'ALBUM1' }
+		const message = await generateWAMessageContent(
+			{ image: Buffer.from('one'), albumParentKey: parentKey },
+			makeOptions()
+		)
+
+		expect(message.imageMessage).toBeTruthy()
+		expect(message.messageContextInfo?.messageAssociation?.parentMessageKey).toMatchObject(parentKey)
+	})
+
+	it('surfaces (does not swallow) an upload failure for an album item', async () => {
+		const parentKey = { remoteJid: '123@g.us', fromMe: true, id: 'ALBUM1' }
+		const options = {
+			...makeOptions(),
+			upload: async () => {
+				throw new Error('upload failed')
+			}
+		}
+
+		// a failed item must reject so the caller can retry/skip it —
+		// silently succeeding would produce a permanently incomplete album
+		await expect(
+			generateWAMessageContent({ image: Buffer.from('one'), albumParentKey: parentKey }, options)
+		).rejects.toThrow('upload failed')
+	})
+
 	it('wraps a group status and tags the context info', async () => {
 		const message = await generateWAMessageContent({ text: 'status', groupStatus: true }, makeOptions())
 
