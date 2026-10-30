@@ -76,6 +76,7 @@ import {
 	getBinaryNodeChildren,
 	getBinaryNodeChildString,
 	getBinaryNodeChildUInt,
+	isJidBroadcast,
 	isJidGroup,
 	isJidMetaAI,
 	isJidNewsletter,
@@ -1693,9 +1694,35 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 								'messages.update',
 								ids.map(id => ({
 									key: { ...key, id },
-									update: { status, messageTimestamp: toNumber(+(attrs.t ?? 0)) }
+									update: { status }
 								}))
 							)
+							// the receipt time is not the message's send time: publish it on
+							// message-receipt.update instead of overwriting messageTimestamp
+							const timestamp = Number(attrs.t)
+							const timestampField =
+								status === proto.WebMessageInfo.Status.DELIVERY_ACK
+									? 'receiptTimestamp'
+									: status === proto.WebMessageInfo.Status.READ
+										? 'readTimestamp'
+										: status === proto.WebMessageInfo.Status.PLAYED
+											? 'playedTimestamp'
+											: undefined
+							if (
+								!isJidBroadcast(remoteJid) &&
+								!isJidBroadcast(attrs.from) &&
+								timestampField &&
+								Number.isSafeInteger(timestamp) &&
+								timestamp > 0
+							) {
+								ev.emit(
+									'message-receipt.update',
+									ids.map(id => ({
+										key: { ...key, id },
+										receipt: { userJid: jidNormalizedUser(attrs.from), [timestampField]: timestamp }
+									}))
+								)
+							}
 						}
 					}
 
