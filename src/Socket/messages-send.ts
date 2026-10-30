@@ -786,6 +786,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 				if (isPollUpdate && !isGroupStatus) {
 					metaAttrs.polltype = 'vote'
+					// as a phone's vote; without this the server acks the vote but does not deliver it
+					metaAttrs.content_type = 'add_on'
 				}
 
 				if (isGroupStatus) {
@@ -797,6 +799,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 			if (
 				isNeedMetaAttrs ||
+				isPollUpdate ||
 				innerMessage.protocolMessage?.memberLabel ||
 				innerMessage.protocolMessage?.editedMessage ||
 				innerMessage.protocolMessage?.mediaNotifyMessage
@@ -1117,7 +1120,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					attrs: {
 						v: '2',
 						type,
-						count: participant!.count.toString()
+						count: participant!.count.toString(),
+						...(extraAttrs['decrypt-fail'] ? { 'decrypt-fail': extraAttrs['decrypt-fail'] } : {})
 					},
 					content: encryptedContent
 				})

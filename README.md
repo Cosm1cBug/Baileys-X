@@ -1393,6 +1393,20 @@ await sock.sendMessage(jid, {
 
 // vote on an existing poll (vote = IPollEncValue from the poll's vote handling)
 await sock.sendMessage(jid, { pollUpdate: { key: pollKey, vote } })
+
+// cast a vote by option name — the vote encryption is handled for you.
+// pollEncKey is the poll creation message's messageContextInfo.messageSecret;
+// both JIDs are device-less, in the chat's addressing mode (LID or phone number).
+// An empty selectedOptions list withdraws your vote.
+await sock.sendMessage(jid, {
+    pollVote: {
+        pollCreationMessageKey: pollKey,
+        pollEncKey,
+        selectedOptions: ['Pizza'],
+        pollCreatorJid: creatorJid,
+        voterJid: myJid
+    }
+})
 ```
 
 #### Keep & Flow Reply
@@ -2112,6 +2126,7 @@ detail in the sections above.
 | Reaction | `{ react: { text: '❤️', key: msg.key } }` |
 | Pin | `{ pin: { type: 1, time: 86400, key: msg.key } }` |
 | Poll | `{ poll: { name: 'Lunch?', values: ['A', 'B'], selectableCount: 1 } }` |
+| Poll vote | `{ pollVote: { pollCreationMessageKey, pollEncKey, selectedOptions: ['A'], pollCreatorJid, voterJid } }` |
 | Event | `{ event: { name: 'Meetup', startDate: new Date() } }` |
 | Album † | `{ album: [{ image: { url: './1.jpg' } }, { image: { url: './2.jpg' } }] }` |
 | Buttons / list / Native Flow / carousel † | `{ text: 'Pick', nativeFlow: [{ id: 'a', text: 'A' }] }` (see Interactive Messages) |
