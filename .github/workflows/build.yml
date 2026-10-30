@@ -41,3 +41,6 @@ jobs:
 
       - name: Build project
         run: yarn build
+
+      - name: Verify CommonJS require() of the ESM build
+        run: node scripts/check-require.cjs
