@@ -63,6 +63,7 @@ export const DEFAULT_CONNECTION_CONFIG: SocketConfig = {
 	browser: Browsers.macOS('Chrome'),
 	waWebSocketUrl: 'wss://web.whatsapp.com/ws/chat',
 	connectTimeoutMs: 20_000,
+	initialBufferTimeoutMs: 30_000,
 	keepAliveIntervalMs: 30_000,
 	logger: logger.child({ class: 'baileys' }),
 	emitOwnEvents: true,

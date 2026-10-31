@@ -2266,6 +2266,7 @@ const sock = makeWASocket({
     browser: Browsers.macOS('Chrome'),     // client identity presented to WA
     waWebSocketUrl: 'wss://web.whatsapp.com/ws/chat',
     connectTimeoutMs: 20_000,              // fail connect after 20s
+    initialBufferTimeoutMs: 30_000,        // release the initial event buffer if the server's offline stanza never arrives (0 = legacy behaviour)
     keepAliveIntervalMs: 30_000,           // WS ping-pong interval
     defaultQueryTimeoutMs: 60_000,         // per-query timeout (undefined = none)
     qrTimeout: undefined,                  // ms to wait for next QR
