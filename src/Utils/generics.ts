@@ -27,8 +27,16 @@ export const BufferJSON = {
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	reviver: (_: any, value: any) => {
-		if (typeof value === 'object' && value !== null && value.type === 'Buffer' && typeof value.data === 'string') {
-			return Buffer.from(value.data, 'base64')
+		if (typeof value === 'object' && value !== null && value.type === 'Buffer') {
+			if (typeof value.data === 'string') return Buffer.from(value.data, 'base64')
+			// Older sender-key records used Buffer.toJSON's numeric-array representation.
+			if (
+				Array.isArray(value.data) &&
+				value.data.every(
+					(byte: unknown) => typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255
+				)
+			)
+				return Buffer.from(value.data)
 		}
 
 		if (typeof value === 'object' && value !== null && !Array.isArray(value)) {

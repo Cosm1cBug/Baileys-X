@@ -93,18 +93,21 @@ export function makeCacheableSignalKeyStore(
 				let keys = 0
 				for (const type in data) {
 					for (const id in data[type as keyof SignalDataTypeMap]) {
-						await cache.set(getUniqueId(type, id), data[type as keyof SignalDataTypeMap]![id]!)
+						// A store may normalize on write; fetch its canonical value on the next read.
+						await cache.del(getUniqueId(type, id))
 						keys += 1
 					}
 				}
 
-				logger?.trace({ keys }, 'updated cache')
 				await store.set(data)
+				logger?.trace({ keys }, 'invalidated cache')
 			})
 		},
 		async clear() {
-			await cache.flushAll()
-			await store.clear?.()
+			await cacheMutex.runExclusive(async () => {
+				await cache.flushAll()
+				await store.clear?.()
+			})
 		}
 	}
 }

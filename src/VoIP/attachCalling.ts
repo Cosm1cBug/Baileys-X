@@ -17,9 +17,9 @@ import { RelayRtcTransport } from './lib/relay/RelayRtcTransport'
 const S_WHATSAPP_NET = '@s.whatsapp.net'
 
 /**
- * Stanza tags the engine consumes for an in-progress call. Anything else
- * (offers for answering, relay latency, …) is still reported via
- * `onCallNode`, but only these are fed to the engine automatically.
+ * Stanza tags fed to the engine. Other nodes, such as relay latency, are
+ * still reported via `onCallNode`. Ingesting an offer does not establish an
+ * incoming media session; answering calls is not yet supported end-to-end.
  */
 const ENGINE_INBOUND_TAGS = new Set([
 	'offer',

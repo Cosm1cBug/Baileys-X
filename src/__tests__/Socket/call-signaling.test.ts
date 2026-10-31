@@ -1,12 +1,15 @@
+import NodeCache from '@cacheable/node-cache'
 import { jest } from '@jest/globals'
 import { DEFAULT_CONNECTION_CONFIG } from '../../Defaults'
-import type { AuthenticationState } from '../../Types'
+import type { AuthenticationState, CacheStore } from '../../Types'
 import type { BinaryNode } from '../../WABinary'
 
 const query = jest.fn(async (_node: BinaryNode): Promise<BinaryNode> => {
 	void _node
 	return { tag: 'iq', attrs: { type: 'result' }, content: undefined }
 })
+
+const callOfferCache = new NodeCache({ useClones: false })
 
 const authState = {
 	creds: {
@@ -43,17 +46,19 @@ const { makeMessagesRecvSocket } = await import('../../Socket/messages-recv')
 const makeSock = () =>
 	makeMessagesRecvSocket({
 		...DEFAULT_CONNECTION_CONFIG,
-		auth: authState as unknown as AuthenticationState
+		auth: authState as unknown as AuthenticationState,
+		callOfferCache: callOfferCache as unknown as CacheStore
 	})
 
 const callStanza = (queryMock: typeof query, callIndex: number) => {
-	const node = queryMock.mock.calls[callIndex]![0] as BinaryNode
+	const node = queryMock.mock.calls[callIndex]![0]
 	return node.content?.[0] as BinaryNode
 }
 
 describe('call signalling', () => {
 	beforeEach(() => {
 		query.mockClear()
+		callOfferCache.flushAll()
 	})
 
 	it('rejects a call with a reject stanza', async () => {
@@ -61,7 +66,7 @@ describe('call signalling', () => {
 		await sock.rejectCall('call-1', '5511888888888@s.whatsapp.net')
 		expect(query).toHaveBeenCalledTimes(1)
 
-		const stanza = query.mock.calls[0]![0] as BinaryNode
+		const stanza = query.mock.calls[0]![0]
 		expect(stanza.tag).toBe('call')
 		expect(stanza.attrs).toEqual({ from: '5511999999999:4@s.whatsapp.net', to: '5511888888888@s.whatsapp.net' })
 		const child = callStanza(query, 0)
@@ -70,15 +75,22 @@ describe('call signalling', () => {
 	})
 
 	it('accepts a call with an accept stanza', async () => {
+		callOfferCache.set('call-1', {
+			id: 'call-1',
+			from: '5511888888888@s.whatsapp.net',
+			status: 'offer',
+			rawNode: { tag: 'offer', attrs: {}, content: [{ tag: 'relay', attrs: { token: 'synthetic' } }] }
+		})
 		const sock = makeSock()
 		await sock.acceptCall('call-1', '5511888888888@s.whatsapp.net')
 		expect(query).toHaveBeenCalledTimes(1)
 
-		const stanza = query.mock.calls[0]![0] as BinaryNode
+		const stanza = query.mock.calls[0]![0]
 		expect(stanza.tag).toBe('call')
 		expect(stanza.attrs).toEqual({ from: '5511999999999:4@s.whatsapp.net', to: '5511888888888@s.whatsapp.net' })
 		const child = callStanza(query, 0)
 		expect(child.tag).toBe('accept')
+		expect(child.content).toEqual([{ tag: 'relay', attrs: { token: 'synthetic' } }])
 		expect(child.attrs).toEqual({ 'call-id': 'call-1', 'call-creator': '5511888888888@s.whatsapp.net', count: '0' })
 	})
 
@@ -87,7 +99,7 @@ describe('call signalling', () => {
 		await sock.terminateCall('call-1', '5511888888888@s.whatsapp.net')
 		expect(query).toHaveBeenCalledTimes(1)
 
-		const stanza = query.mock.calls[0]![0] as BinaryNode
+		const stanza = query.mock.calls[0]![0]
 		expect(stanza.tag).toBe('call')
 		const child = callStanza(query, 0)
 		expect(child.tag).toBe('terminate')

@@ -972,7 +972,7 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
 
 - `getContentType`, returns the content type for any message
 - `getDevice`, returns the device from message
-- `makeCacheableSignalKeyStore`, make auth store more fast
+- `makeCacheableSignalKeyStore` is an optional cache for auth stores; assess whether it helps your storage backend.
 - `downloadContentFromMessage`, download content from any message
 - `sock.getRealJid` / `sock.getLidForJid`, resolve between LID and phone-number JIDs (see above)
 - `newsletterId`, extract the numeric id from a newsletter JID
@@ -1639,23 +1639,13 @@ Every inbound stanza is reported twice:
   every in-call stanza as it arrives
 
 Stanzas for calls **you** placed (accept, preaccept, terminate, …) are fed
-to the engine automatically. Answering an incoming offer is deliberately
-left to you — the pieces are exported:
-
-```ts
-import { extractOfferEnc, decryptInboundCallKey, parseInboundOfferLid } from 'baileys/lib/VoIP/index.js'
-
-onCallNode: async (child, callNode) => {
-    if (child.tag !== 'offer') return
-    const myLidJid = sock.authState.creds.me.lid
-    const enc = extractOfferEnc(child.content as BinaryNode[], myLidJid)
-    const callKey = enc && (await decryptInboundCallKey(sock, enc, parseInboundOfferLid(child)))
-    if (!callKey) return // not addressed to us / undecryptable
-    calling.voip.setE2ECallKey(callKey, myLidJid, parseInboundOfferLid(child))
-    calling.feedCallNode(callNode) // engine now tracks the call
-    await sock.acceptCall(child.attrs['call-id'], child.attrs['call-creator'])
-}
-```
+to the engine automatically. Incoming offers are also surfaced, but the
+bundled engine does **not** provide a verified incoming-call answering/media
+pipeline. `sock.acceptCall(call.id, call.from)` sends signalling only: it
+uses the cached offer's relay block and rejects if the matching offer or relay
+is unavailable, or if no response arrives. A response is not proof the call
+connected or that audio is flowing. Incoming voice and video remain unverified;
+there is no video media pipeline.
 
 > ⚠️ Calling is unofficial-client protocol work: it can break as WhatsApp
 > changes its VoIP stack, and misuse can get numbers banned. The engine has
@@ -2253,14 +2243,14 @@ const entities = Toolkit.extractIE('Hello **world**')
 
 ### Call Signalling
 
-Accept or terminate incoming calls (signalling only — for full call media
-use the built-in engine, see [Voice Calling](#voice-calling)):
+Accept or terminate incoming calls (signalling only; the bundled engine does
+not currently provide a verified incoming-call media pipeline):
 
 ```ts
 sock.ev.on('call', async ([call]) => {
     if (call.status === 'offer') {
         await sock.acceptCall(call.id, call.from)
-        // ... hand media to your engine ...
+        // A response does not establish a working media session.
         await sock.terminateCall(call.id, call.from)
     }
 })
