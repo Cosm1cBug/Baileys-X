@@ -75,6 +75,7 @@ export const makeSocket = (config: SocketConfig) => {
 	const {
 		waWebSocketUrl,
 		connectTimeoutMs,
+		initialBufferTimeoutMs = 30_000,
 		logger,
 		keepAliveIntervalMs,
 		browser,
@@ -1128,12 +1129,36 @@ export const makeSocket = (config: SocketConfig) => {
 	})
 
 	let didStartBuffer = false
+	let initialBufferTimer: ReturnType<typeof setTimeout> | undefined
 	process.nextTick(() => {
 		if (creds.me?.id) {
 			// start buffering important events
 			// if we're logged in
 			ev.buffer()
 			didStartBuffer = true
+			// the <ib><offline> stanza that normally releases this buffer is not
+			// guaranteed to arrive: without a fallback the buffered events stay
+			// held and `receivedPendingNotifications` never fires, leaving the
+			// app silently deaf. Release the buffer after a bounded wait —
+			// flush() only ever releases events in order, nothing is dropped.
+			if (initialBufferTimeoutMs > 0) {
+				initialBufferTimer = setTimeout(() => {
+					initialBufferTimer = undefined
+					if (!didStartBuffer) {
+						return
+					}
+
+					didStartBuffer = false
+					logger.warn(
+						{ initialBufferTimeoutMs },
+						'offline stanza not received within the initial buffer timeout, releasing buffered events'
+					)
+					ev.flush()
+					ev.emit('connection.update', { receivedPendingNotifications: true })
+				}, initialBufferTimeoutMs)
+				// never keep the process alive just for this fallback
+				initialBufferTimer.unref()
+			}
 		}
 
 		ev.emit('connection.update', { connection: 'connecting', receivedPendingNotifications: false, qr: undefined })
@@ -1141,11 +1166,17 @@ export const makeSocket = (config: SocketConfig) => {
 
 	// called when all offline notifs are handled
 	ws.on('CB:ib,,offline', (node: BinaryNode) => {
+		if (initialBufferTimer) {
+			clearTimeout(initialBufferTimer)
+			initialBufferTimer = undefined
+		}
+
 		const child = getBinaryNodeChild(node, 'offline')
 		const offlineNotifs = +(child?.attrs.count || 0)
 
 		logger.info(`handled ${offlineNotifs} offline messages/notifications`)
 		if (didStartBuffer) {
+			didStartBuffer = false
 			ev.flush()
 			logger.trace('flushed events for initial buffer')
 		}
@@ -1230,6 +1261,14 @@ export const makeSocket = (config: SocketConfig) => {
 	// so this also fires for abnormal closes (1006)
 	registerSocketEndHandler(() => {
 		keys.disposeTransactionStorage()
+	})
+
+	// the initial-buffer watchdog must not outlive the socket
+	registerSocketEndHandler(() => {
+		if (initialBufferTimer) {
+			clearTimeout(initialBufferTimer)
+			initialBufferTimer = undefined
+		}
 	})
 
 	/**
