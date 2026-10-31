@@ -18,7 +18,7 @@ export const ME = { id: '12025550199@s.whatsapp.net', name: 'Fictional owner' }
 export const silentLogger = logger.child({ class: 'receipt-test' })
 silentLogger.level = 'silent'
 
-export function fixture() {
+export function fixture(query?: (node: BinaryNode, timeoutMs?: number) => Promise<BinaryNode | undefined>) {
 	const ev = makeEventBuffer(silentLogger)
 	const ws = Object.assign(new EventEmitter(), {
 		isOpen: true,
@@ -52,9 +52,11 @@ export function fixture() {
 		ev,
 		ws,
 		authState: { creds, keys },
-		query: async () => {
-			throw new Error('Unexpected query in receipt test')
-		},
+		query:
+			query ??
+			(async () => {
+				throw new Error('Unexpected query in receipt test')
+			}),
 		sendNode: async (node: BinaryNode) => {
 			sent.push(node)
 		},
@@ -81,10 +83,14 @@ export function fixture() {
 		fetchAccountReachoutTimelock: async () => undefined,
 		placeholderResendCache: { get: async () => undefined, set: async () => {}, del: async () => {} }
 	} as unknown as ReturnType<typeof makeMessagesSocket>
-	makeMessagesRecvSocket(config)
+	const sock = makeMessagesRecvSocket(config)
 	return {
+		sock,
 		batches,
 		sent,
+		async receiveCall(node: BinaryNode) {
+			for (const handler of ws.listeners('CB:call')) await handler(node)
+		},
 		async receive(node: BinaryNode) {
 			for (const handler of ws.listeners('CB:receipt')) await handler(node)
 		},

@@ -616,6 +616,16 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	 * itself needs a media engine, see CALLING.md.
 	 */
 	const acceptCall = async (callId: string, callFrom: string) => {
+		const offer = await callOfferCache.get<WACallEvent>(callId)
+		if (offer?.status !== 'offer' || offer.from !== callFrom) {
+			throw new Boom('Matching incoming call offer not found in cache', { statusCode: 404 })
+		}
+
+		const relay = offer.rawNode && getBinaryNodeChild(offer.rawNode, 'relay')
+		if (!relay) {
+			throw new Boom('Incoming call offer has no relay; cannot send accept', { statusCode: 400 })
+		}
+
 		const stanza: BinaryNode = {
 			tag: 'call',
 			attrs: {
@@ -627,14 +637,21 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 					tag: 'accept',
 					attrs: {
 						'call-id': callId,
-						'call-creator': callFrom,
+						'call-creator': offer.rawNode?.attrs['call-creator'] || callFrom,
 						count: '0'
 					},
-					content: undefined
+					content: [relay]
 				}
 			]
 		}
-		await query(stanza)
+		const response: BinaryNode | undefined = await query(stanza, 10_000)
+		if (!response) {
+			throw new Boom('Call accept acknowledgement timed out; call status is unknown', { statusCode: 408 })
+		}
+
+		if (response.attrs.error) {
+			throw new Boom('Call accept was rejected by the server', { data: { code: response.attrs.error } })
+		}
 	}
 
 	/**
