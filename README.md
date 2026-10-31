@@ -114,7 +114,7 @@ so its supply chain is deliberately boring:
   - [🔔 Receive Notifications in Whatsapp App](#receive-notifications-in-whatsapp-app)
 - [💾 Saving & Restoring Sessions](#saving--restoring-sessions)
 - [📡 Handling Events](#handling-events)
-  - [📡 All Events — Complete Reference (37)](#-all-events--complete-reference-37)
+  - [📡 All Events — Complete Reference (38)](#-all-events--complete-reference-38)
   - [▶️ Example to Start](#example-to-start)
   - [📊 Decrypt Poll Votes](#decrypt-poll-votes)
   - [🧭 Summary of Events on First Connection](#summary-of-events-on-first-connection)
@@ -402,7 +402,7 @@ sock.ev.on('processing.error', ({ error, context }) => {
 })
 ```
 
-### 📡 All Events — Complete Reference (37)
+### 📡 All Events — Complete Reference (38)
 
 Every event declared in the `BaileysEventMap` type — nothing omitted. Each one
 with a minimal, working listener. Most events are delivered immediately; a few
@@ -411,7 +411,7 @@ consolidated by the event buffer during stanza bursts and flushed together —
 the payloads below are what your handler receives either way.
 
 **Index:**
-`connection.update` · `creds.update` · `messaging-history.set` · `messaging-history.status` · `chats.upsert` · `chats.update` · `chats.delete` · `lid-mapping.update` · `contacts.upsert` · `contacts.update` · `presence.update` · `messages.upsert` · `messages.update` · `messages.delete` · `messages.media-update` · `messages.reaction` · `message-receipt.update` · `groups.upsert` · `groups.update` · `group-participants.update` · `group.join-request` · `group.member-tag.update` · `call` · `labels.edit` · `labels.association` · `blocklist.set` · `blocklist.update` · `identity-change` · `newsletter.reaction` · `newsletter.view` · `newsletter-participants.update` · `newsletter-settings.update` · `newsletter-partnership.update` · `message-capping.update` · `chats.lock` · `settings.update` · `processing.error`
+`connection.update` · `creds.update` · `messaging-history.set` · `messaging-history.status` · `chats.upsert` · `chats.update` · `app-state.update` · `chats.delete` · `lid-mapping.update` · `contacts.upsert` · `contacts.update` · `presence.update` · `messages.upsert` · `messages.update` · `messages.delete` · `messages.media-update` · `messages.reaction` · `message-receipt.update` · `groups.upsert` · `groups.update` · `group-participants.update` · `group.join-request` · `group.member-tag.update` · `call` · `labels.edit` · `labels.association` · `blocklist.set` · `blocklist.update` · `identity-change` · `newsletter.reaction` · `newsletter.view` · `newsletter-participants.update` · `newsletter-settings.update` · `newsletter-partnership.update` · `message-capping.update` · `chats.lock` · `settings.update` · `processing.error`
 
 #### 🔗 Connection & Credentials
 
@@ -475,6 +475,30 @@ sock.ev.on('chats.update', (updates) => {
     }
 })
 ```
+
+##### `app-state.update`
+Unbuffered evidence about app-state read/archive actions and patch responses. A
+`chat-action` can be a historical sync (`source: 'sync'`) or a local echo
+(`source: 'local-echo'`); sync observations include collection, version,
+representation, initial-sync status and whether MAC verification was enabled.
+Action timestamps and message ranges are present only when supplied. A
+`patch-response` reports an IQ response, **not** proof that the phone applied it.
+
+```ts
+sock.ev.on('app-state.update', (event) => {
+    if (event.kind === 'chat-action') {
+        console.log(event.jid, event.action, event.source, event.collection, event.version)
+    } else {
+        console.log(event.collection, event.version, event.status, event.requestId)
+    }
+})
+
+// Optional requestId correlates local response and echo only; it is not sent to WhatsApp.
+await sock.chatModify({ markRead: true, lastMessages }, jid, { requestId: 'my-local-id' })
+```
+
+Synced actions can be historical or repeated during resync. They are not read
+receipts, and an observation alone does not establish the current chat state.
 
 ##### `chats.delete`
 Chats were deleted (array of chat JIDs).
