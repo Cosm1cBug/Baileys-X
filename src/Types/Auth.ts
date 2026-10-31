@@ -98,7 +98,7 @@ export type SignalKeyStore = {
 export type SignalKeyStoreWithTransaction = SignalKeyStore & {
 	isInTransaction: () => boolean
 	transaction<T>(exec: () => Promise<T>, key: string): Promise<T>
-	/** releases the internal AsyncLocalStorage; must be called on socket end to avoid a leak */
+	/** @deprecated Retained for compatibility; shared transaction storage needs no per-socket disposal. */
 	disposeTransactionStorage(): void
 }
 

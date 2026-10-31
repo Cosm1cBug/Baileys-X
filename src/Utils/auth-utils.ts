@@ -28,6 +28,9 @@ interface TransactionContext {
 	dbQueries: number
 }
 
+// Share one async-local instance across wrappers while keeping each store isolated.
+const txStorage = new AsyncLocalStorage<Map<symbol, TransactionContext>>()
+
 /**
  * Adds caching capability to a SignalKeyStore
  * @param store the store to add caching to
@@ -121,7 +124,8 @@ export const addTransactionCapability = (
 	logger: ILogger,
 	{ maxCommitRetries, delayBetweenTriesMs }: TransactionCapabilityOptions
 ): SignalKeyStoreWithTransaction => {
-	const txStorage = new AsyncLocalStorage<TransactionContext>()
+	const storeToken = Symbol('signalTxStore')
+	const getContext = () => txStorage.getStore()?.get(storeToken)
 
 	// Queues for concurrency control (keyed by signal data type - bounded set)
 	const keyQueues = new Map<string, PQueue>()
@@ -165,7 +169,7 @@ export const addTransactionCapability = (
 	 * Check if currently in a transaction
 	 */
 	function isInTransaction(): boolean {
-		return !!txStorage.getStore()
+		return !!getContext()
 	}
 
 	/**
@@ -199,7 +203,7 @@ export const addTransactionCapability = (
 
 	return {
 		get: async (type, ids) => {
-			const ctx = txStorage.getStore()
+			const ctx = getContext()
 
 			if (!ctx) {
 				// No transaction - direct read without exclusive lock for concurrency
@@ -234,7 +238,7 @@ export const addTransactionCapability = (
 		},
 
 		set: async data => {
-			const ctx = txStorage.getStore()
+			const ctx = getContext()
 
 			if (!ctx) {
 				// No transaction - direct write with queue protection
@@ -286,7 +290,8 @@ export const addTransactionCapability = (
 		transaction: async (work, key) => {
 			void key // trace-log-unsafe (callers embed JIDs in it) - kept for type compat only
 
-			const existing = txStorage.getStore()
+			const stores = txStorage.getStore()
+			const existing = stores?.get(storeToken)
 
 			// Nested transaction - reuse existing context
 			if (existing) {
@@ -305,7 +310,9 @@ export const addTransactionCapability = (
 				logger.trace('entering transaction')
 
 				try {
-					const result = await txStorage.run(ctx, work)
+					const next = new Map(stores)
+					next.set(storeToken, ctx)
+					const result = await txStorage.run(next, work)
 
 					// Commit mutations
 					await commitWithRetry(ctx.mutations)
@@ -320,21 +327,8 @@ export const addTransactionCapability = (
 			})
 		},
 
-		disposeTransactionStorage: () => {
-			// The first txStorage.run() enables the storage, which registers it in a
-			// module-global list inside node:async_hooks holding a STRONG reference.
-			// On Node < 24 every enabled storage also stamps one symbol-keyed property
-			// onto every async resource created anywhere in the process, so the cost of
-			// never disabling grows with sockets-ever-created x live async resources
-			// (observed: 1.9GB of a 2.1GB heap after 25h at ~250 concurrent sockets).
-			// Only .disable() releases it - GC alone never collects an enabled storage,
-			// on any Node version.
-			try {
-				txStorage.disable()
-			} catch (err) {
-				logger.warn({ err }, 'failed to disable transaction storage')
-			}
-		}
+		// Retained for API compatibility: disabling shared storage would disrupt other sockets.
+		disposeTransactionStorage: () => {}
 	}
 }
 
