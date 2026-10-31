@@ -35,6 +35,14 @@ export type SocketConfig = {
 	waWebSocketUrl: string | URL
 	/** Fails the connection if the socket times out in this interval */
 	connectTimeoutMs: number
+	/**
+	 * how long the initial event buffer waits for the server's offline stanza
+	 * (`<ib><offline>`) before releasing buffered events anyway, in ms.
+	 * That stanza is not guaranteed to arrive; without this fallback the
+	 * buffer would only be released by chance and
+	 * `receivedPendingNotifications` would never fire. Set to 0 to disable.
+	 */
+	initialBufferTimeoutMs?: number
 	/** Default timeout for queries, undefined for no timeout */
 	defaultQueryTimeoutMs: number | undefined
 	/** ping-pong interval for WS connection */
