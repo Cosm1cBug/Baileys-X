@@ -1256,13 +1256,6 @@ export const makeSocket = (config: SocketConfig) => {
 		socketEndHandlers.push(handler)
 	}
 
-	// free the per-socket AsyncLocalStorage created by addTransactionCapability -
-	// end() runs every handler unconditionally and is reached from ws.on('close'),
-	// so this also fires for abnormal closes (1006)
-	registerSocketEndHandler(() => {
-		keys.disposeTransactionStorage()
-	})
-
 	// the initial-buffer watchdog must not outlive the socket
 	registerSocketEndHandler(() => {
 		if (initialBufferTimer) {

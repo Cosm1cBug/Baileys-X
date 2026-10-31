@@ -158,3 +158,52 @@ describe('addTransactionCapability', () => {
 		expect(final.group1).toEqual({ deviceA: true, deviceB: true, deviceC: true })
 	})
 })
+
+describe('transaction context isolation between stores', () => {
+	it('preserves each store context through nested transactions and disposal', async () => {
+		const rawA = makeInMemoryStore()
+		const rawB = makeInMemoryStore()
+		const opts = { maxCommitRetries: 1, delayBetweenTriesMs: 5 }
+		const a = addTransactionCapability(rawA, makeTestLogger(), opts)
+		const b = addTransactionCapability(rawB, makeTestLogger(), opts)
+
+		await a.transaction(async () => {
+			await a.set({ 'sender-key-memory': { a: { first: true } } })
+			expect(b.isInTransaction()).toBe(false)
+			await b.transaction(async () => {
+				expect(a.isInTransaction()).toBe(true)
+				expect(b.isInTransaction()).toBe(true)
+				b.disposeTransactionStorage()
+				expect(a.isInTransaction()).toBe(true)
+				expect(b.isInTransaction()).toBe(true)
+				await a.set({ 'sender-key-memory': { a: { second: true } } })
+				await b.set({ 'sender-key-memory': { b: { only: true } } })
+			}, 'b')
+			expect(b.isInTransaction()).toBe(false)
+			expect(await rawA.get('sender-key-memory', ['a'])).toEqual({})
+		}, 'a')
+
+		expect(await rawA.get('sender-key-memory', ['a', 'b'])).toEqual({ a: { second: true } })
+		expect(await rawB.get('sender-key-memory', ['a', 'b'])).toEqual({ b: { only: true } })
+	})
+
+	it('does not commit another store’s writes when an outer transaction rolls back', async () => {
+		const rawA = makeInMemoryStore()
+		const rawB = makeInMemoryStore()
+		const opts = { maxCommitRetries: 1, delayBetweenTriesMs: 5 }
+		const a = addTransactionCapability(rawA, makeTestLogger(), opts)
+		const b = addTransactionCapability(rawB, makeTestLogger(), opts)
+
+		await expect(
+			a.transaction(async () => {
+				await a.set({ 'sender-key-memory': { a: { value: true } } })
+				await b.transaction(async () => {
+					await b.set({ 'sender-key-memory': { b: { value: true } } })
+				}, 'b')
+				throw new Error('rollback')
+			}, 'a')
+		).rejects.toThrow('rollback')
+		expect(await rawA.get('sender-key-memory', ['a', 'b'])).toEqual({})
+		expect(await rawB.get('sender-key-memory', ['a', 'b'])).toEqual({ b: { value: true } })
+	})
+})
