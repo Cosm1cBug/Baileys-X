@@ -37826,12 +37826,40 @@ export const proto = $root.proto = (() => {
         }
 
         EventInviteAdditionalMetadata.prototype.isUpdated = null;
+        EventInviteAdditionalMetadata.prototype.selfAccessStatus = null;
+        EventInviteAdditionalMetadata.prototype.selfRsvpStatus = null;
+        EventInviteAdditionalMetadata.prototype.selfAdditionalGuestCount = null;
+        EventInviteAdditionalMetadata.prototype.selfInviteeLastUpdatedTsUsec = null;
 
         let $oneOfFields;
 
         // Virtual OneOf for proto3 optional field
         Object.defineProperty(EventInviteAdditionalMetadata.prototype, "_isUpdated", {
             get: $util.oneOfGetter($oneOfFields = ["isUpdated"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        Object.defineProperty(EventInviteAdditionalMetadata.prototype, "_selfAccessStatus", {
+            get: $util.oneOfGetter($oneOfFields = ["selfAccessStatus"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        Object.defineProperty(EventInviteAdditionalMetadata.prototype, "_selfRsvpStatus", {
+            get: $util.oneOfGetter($oneOfFields = ["selfRsvpStatus"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        Object.defineProperty(EventInviteAdditionalMetadata.prototype, "_selfAdditionalGuestCount", {
+            get: $util.oneOfGetter($oneOfFields = ["selfAdditionalGuestCount"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        Object.defineProperty(EventInviteAdditionalMetadata.prototype, "_selfInviteeLastUpdatedTsUsec", {
+            get: $util.oneOfGetter($oneOfFields = ["selfInviteeLastUpdatedTsUsec"]),
             set: $util.oneOfSetter($oneOfFields)
         });
 
@@ -37844,6 +37872,14 @@ export const proto = $root.proto = (() => {
                 w = $Writer.create();
             if (m.isUpdated != null && Object.hasOwnProperty.call(m, "isUpdated"))
                 w.uint32(8).bool(m.isUpdated);
+            if (m.selfAccessStatus != null && Object.hasOwnProperty.call(m, "selfAccessStatus"))
+                w.uint32(16).int32(m.selfAccessStatus);
+            if (m.selfRsvpStatus != null && Object.hasOwnProperty.call(m, "selfRsvpStatus"))
+                w.uint32(24).int32(m.selfRsvpStatus);
+            if (m.selfAdditionalGuestCount != null && Object.hasOwnProperty.call(m, "selfAdditionalGuestCount"))
+                w.uint32(32).uint32(m.selfAdditionalGuestCount);
+            if (m.selfInviteeLastUpdatedTsUsec != null && Object.hasOwnProperty.call(m, "selfInviteeLastUpdatedTsUsec"))
+                w.uint32(40).int64(m.selfInviteeLastUpdatedTsUsec);
             return w;
         };
 
@@ -37862,6 +37898,22 @@ export const proto = $root.proto = (() => {
                 switch (t >>> 3) {
                 case 1: {
                         m.isUpdated = r.bool();
+                        break;
+                    }
+                case 2: {
+                        m.selfAccessStatus = r.int32();
+                        break;
+                    }
+                case 3: {
+                        m.selfRsvpStatus = r.int32();
+                        break;
+                    }
+                case 4: {
+                        m.selfAdditionalGuestCount = r.uint32();
+                        break;
+                    }
+                case 5: {
+                        m.selfInviteeLastUpdatedTsUsec = r.int64();
                         break;
                     }
                 default:
@@ -37883,6 +37935,75 @@ export const proto = $root.proto = (() => {
             if (d.isUpdated != null) {
                 m.isUpdated = Boolean(d.isUpdated);
             }
+            switch (d.selfAccessStatus) {
+            default:
+                if (typeof d.selfAccessStatus === "number") {
+                    m.selfAccessStatus = d.selfAccessStatus;
+                    break;
+                }
+                break;
+            case "ACCESS_STATUS_UNKNOWN":
+            case 0:
+                m.selfAccessStatus = 0;
+                break;
+            case "HAS_ACCESS":
+            case 1:
+                m.selfAccessStatus = 1;
+                break;
+            case "LEFT_EVENT":
+            case 2:
+                m.selfAccessStatus = 2;
+                break;
+            case "REMOVED_FROM_INVITE_LIST":
+            case 3:
+                m.selfAccessStatus = 3;
+                break;
+            case "UNAVAILABLE":
+            case 4:
+                m.selfAccessStatus = 4;
+                break;
+            }
+            switch (d.selfRsvpStatus) {
+            default:
+                if (typeof d.selfRsvpStatus === "number") {
+                    m.selfRsvpStatus = d.selfRsvpStatus;
+                    break;
+                }
+                break;
+            case "RSVP_STATUS_UNKNOWN":
+            case 0:
+                m.selfRsvpStatus = 0;
+                break;
+            case "GOING":
+            case 1:
+                m.selfRsvpStatus = 1;
+                break;
+            case "NOT_GOING":
+            case 2:
+                m.selfRsvpStatus = 2;
+                break;
+            case "MAYBE":
+            case 3:
+                m.selfRsvpStatus = 3;
+                break;
+            case "NO_RESPONSE":
+            case 4:
+                m.selfRsvpStatus = 4;
+                break;
+            }
+            if (d.selfAdditionalGuestCount != null) {
+                m.selfAdditionalGuestCount = d.selfAdditionalGuestCount >>> 0;
+            }
+            if (d.selfInviteeLastUpdatedTsUsec != null) {
+                if ($util.Long)
+                    (m.selfInviteeLastUpdatedTsUsec = $util.Long.fromValue(d.selfInviteeLastUpdatedTsUsec)).unsigned = false;
+                else if (typeof d.selfInviteeLastUpdatedTsUsec === "string")
+                    m.selfInviteeLastUpdatedTsUsec = parseInt(d.selfInviteeLastUpdatedTsUsec, 10);
+                else if (typeof d.selfInviteeLastUpdatedTsUsec === "number")
+                    m.selfInviteeLastUpdatedTsUsec = d.selfInviteeLastUpdatedTsUsec;
+                else if (typeof d.selfInviteeLastUpdatedTsUsec === "object")
+                    m.selfInviteeLastUpdatedTsUsec = new $util.LongBits(d.selfInviteeLastUpdatedTsUsec.low >>> 0, d.selfInviteeLastUpdatedTsUsec.high >>> 0).toNumber();
+            }
             return m;
         };
 
@@ -37894,6 +38015,29 @@ export const proto = $root.proto = (() => {
                 d.isUpdated = m.isUpdated;
                 if (o.oneofs)
                     d._isUpdated = "isUpdated";
+            }
+            if (m.selfAccessStatus != null && m.hasOwnProperty("selfAccessStatus")) {
+                d.selfAccessStatus = o.enums === String ? $root.proto.EventInviteAdditionalMetadata.AccessStatus[m.selfAccessStatus] === undefined ? m.selfAccessStatus : $root.proto.EventInviteAdditionalMetadata.AccessStatus[m.selfAccessStatus] : m.selfAccessStatus;
+                if (o.oneofs)
+                    d._selfAccessStatus = "selfAccessStatus";
+            }
+            if (m.selfRsvpStatus != null && m.hasOwnProperty("selfRsvpStatus")) {
+                d.selfRsvpStatus = o.enums === String ? $root.proto.EventInviteAdditionalMetadata.RsvpStatus[m.selfRsvpStatus] === undefined ? m.selfRsvpStatus : $root.proto.EventInviteAdditionalMetadata.RsvpStatus[m.selfRsvpStatus] : m.selfRsvpStatus;
+                if (o.oneofs)
+                    d._selfRsvpStatus = "selfRsvpStatus";
+            }
+            if (m.selfAdditionalGuestCount != null && m.hasOwnProperty("selfAdditionalGuestCount")) {
+                d.selfAdditionalGuestCount = m.selfAdditionalGuestCount;
+                if (o.oneofs)
+                    d._selfAdditionalGuestCount = "selfAdditionalGuestCount";
+            }
+            if (m.selfInviteeLastUpdatedTsUsec != null && m.hasOwnProperty("selfInviteeLastUpdatedTsUsec")) {
+                if (typeof m.selfInviteeLastUpdatedTsUsec === "number")
+                    d.selfInviteeLastUpdatedTsUsec = o.longs === String ? String(m.selfInviteeLastUpdatedTsUsec) : m.selfInviteeLastUpdatedTsUsec;
+                else
+                    d.selfInviteeLastUpdatedTsUsec = o.longs === String ? longToString(m.selfInviteeLastUpdatedTsUsec) : o.longs === Number ? longToNumber(m.selfInviteeLastUpdatedTsUsec) : m.selfInviteeLastUpdatedTsUsec;
+                if (o.oneofs)
+                    d._selfInviteeLastUpdatedTsUsec = "selfInviteeLastUpdatedTsUsec";
             }
             return d;
         };
@@ -37908,6 +38052,26 @@ export const proto = $root.proto = (() => {
             }
             return typeUrlPrefix + "/proto.EventInviteAdditionalMetadata";
         };
+
+        EventInviteAdditionalMetadata.AccessStatus = (function() {
+            const valuesById = {}, values = Object.create(valuesById);
+            values[valuesById[0] = "ACCESS_STATUS_UNKNOWN"] = 0;
+            values[valuesById[1] = "HAS_ACCESS"] = 1;
+            values[valuesById[2] = "LEFT_EVENT"] = 2;
+            values[valuesById[3] = "REMOVED_FROM_INVITE_LIST"] = 3;
+            values[valuesById[4] = "UNAVAILABLE"] = 4;
+            return values;
+        })();
+
+        EventInviteAdditionalMetadata.RsvpStatus = (function() {
+            const valuesById = {}, values = Object.create(valuesById);
+            values[valuesById[0] = "RSVP_STATUS_UNKNOWN"] = 0;
+            values[valuesById[1] = "GOING"] = 1;
+            values[valuesById[2] = "NOT_GOING"] = 2;
+            values[valuesById[3] = "MAYBE"] = 3;
+            values[valuesById[4] = "NO_RESPONSE"] = 4;
+            return values;
+        })();
 
         return EventInviteAdditionalMetadata;
     })();
@@ -55510,6 +55674,7 @@ export const proto = $root.proto = (() => {
             DocumentMessage.prototype.thumbnailWidth = null;
             DocumentMessage.prototype.caption = null;
             DocumentMessage.prototype.accessibilityLabel = null;
+            DocumentMessage.prototype.qrUrl = null;
 
             let $oneOfFields;
 
@@ -55639,6 +55804,12 @@ export const proto = $root.proto = (() => {
                 set: $util.oneOfSetter($oneOfFields)
             });
 
+            // Virtual OneOf for proto3 optional field
+            Object.defineProperty(DocumentMessage.prototype, "_qrUrl", {
+                get: $util.oneOfGetter($oneOfFields = ["qrUrl"]),
+                set: $util.oneOfSetter($oneOfFields)
+            });
+
             DocumentMessage.create = function create(properties) {
                 return new DocumentMessage(properties);
             };
@@ -55688,6 +55859,8 @@ export const proto = $root.proto = (() => {
                     w.uint32(162).string(m.caption);
                 if (m.accessibilityLabel != null && Object.hasOwnProperty.call(m, "accessibilityLabel"))
                     w.uint32(170).string(m.accessibilityLabel);
+                if (m.qrUrl != null && Object.hasOwnProperty.call(m, "qrUrl"))
+                    w.uint32(186).string(m.qrUrl);
                 return w;
             };
 
@@ -55786,6 +55959,10 @@ export const proto = $root.proto = (() => {
                         }
                     case 21: {
                             m.accessibilityLabel = r.string();
+                            break;
+                        }
+                    case 23: {
+                            m.qrUrl = r.string();
                             break;
                         }
                     default:
@@ -55900,6 +56077,9 @@ export const proto = $root.proto = (() => {
                 }
                 if (d.accessibilityLabel != null) {
                     m.accessibilityLabel = String(d.accessibilityLabel);
+                }
+                if (d.qrUrl != null) {
+                    m.qrUrl = String(d.qrUrl);
                 }
                 return m;
             };
@@ -56018,6 +56198,11 @@ export const proto = $root.proto = (() => {
                     d.accessibilityLabel = m.accessibilityLabel;
                     if (o.oneofs)
                         d._accessibilityLabel = "accessibilityLabel";
+                }
+                if (m.qrUrl != null && m.hasOwnProperty("qrUrl")) {
+                    d.qrUrl = m.qrUrl;
+                    if (o.oneofs)
+                        d._qrUrl = "qrUrl";
                 }
                 return d;
             };

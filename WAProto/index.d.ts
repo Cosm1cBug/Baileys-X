@@ -5319,11 +5319,19 @@ export namespace proto {
 
     interface IEventInviteAdditionalMetadata {
         isUpdated?: (boolean|null);
+        selfAccessStatus?: (proto.EventInviteAdditionalMetadata.AccessStatus|null);
+        selfRsvpStatus?: (proto.EventInviteAdditionalMetadata.RsvpStatus|null);
+        selfAdditionalGuestCount?: (number|null);
+        selfInviteeLastUpdatedTsUsec?: (number|Long|null);
     }
 
     class EventInviteAdditionalMetadata implements IEventInviteAdditionalMetadata {
         constructor(p?: proto.IEventInviteAdditionalMetadata);
         public isUpdated?: (boolean|null);
+        public selfAccessStatus?: (proto.EventInviteAdditionalMetadata.AccessStatus|null);
+        public selfRsvpStatus?: (proto.EventInviteAdditionalMetadata.RsvpStatus|null);
+        public selfAdditionalGuestCount?: (number|null);
+        public selfInviteeLastUpdatedTsUsec?: (number|Long|null);
         public static create(properties?: proto.IEventInviteAdditionalMetadata): proto.EventInviteAdditionalMetadata;
         public static encode(m: proto.IEventInviteAdditionalMetadata, w?: $protobuf.Writer): $protobuf.Writer;
         public static decode(r: ($protobuf.Reader|Uint8Array), l?: number): proto.EventInviteAdditionalMetadata;
@@ -5331,6 +5339,25 @@ export namespace proto {
         public static toObject(m: proto.EventInviteAdditionalMetadata, o?: $protobuf.IConversionOptions): { [k: string]: any };
         public toJSON(): { [k: string]: any };
         public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
+    namespace EventInviteAdditionalMetadata {
+
+        enum AccessStatus {
+            ACCESS_STATUS_UNKNOWN = 0,
+            HAS_ACCESS = 1,
+            LEFT_EVENT = 2,
+            REMOVED_FROM_INVITE_LIST = 3,
+            UNAVAILABLE = 4
+        }
+
+        enum RsvpStatus {
+            RSVP_STATUS_UNKNOWN = 0,
+            GOING = 1,
+            NOT_GOING = 2,
+            MAYBE = 3,
+            NO_RESPONSE = 4
+        }
     }
 
     interface IEventResponse {
@@ -7663,6 +7690,7 @@ export namespace proto {
             thumbnailWidth?: (number|null);
             caption?: (string|null);
             accessibilityLabel?: (string|null);
+            qrUrl?: (string|null);
         }
 
         class DocumentMessage implements IDocumentMessage {
@@ -7688,6 +7716,7 @@ export namespace proto {
             public thumbnailWidth?: (number|null);
             public caption?: (string|null);
             public accessibilityLabel?: (string|null);
+            public qrUrl?: (string|null);
             public static create(properties?: proto.Message.IDocumentMessage): proto.Message.DocumentMessage;
             public static encode(m: proto.Message.IDocumentMessage, w?: $protobuf.Writer): $protobuf.Writer;
             public static decode(r: ($protobuf.Reader|Uint8Array), l?: number): proto.Message.DocumentMessage;
