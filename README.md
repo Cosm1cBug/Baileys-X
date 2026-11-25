@@ -52,6 +52,23 @@ To run the example script, download or clone the repo and then type the followin
 2. ``` yarn ```
 3. ``` yarn example ```
 
+## Audio stickers (provisional)
+
+Audio stickers can be sent with `sendMessage` using a WebP sticker and an Ogg Opus audio file:
+
+```ts
+await sock.sendMessage(jid, {
+  audioSticker: {
+    sticker: { url: './media/sticker.webp' },
+    audio: { url: './media/audio.ogg' }
+  }
+})
+```
+
+This implementation follows a tester-reported working payload, but the native send path has not yet been verified on a real WhatsApp client. It is provisional and may change. Install the optional `sharp` peer dependency to validate WebP files. Input sources may be buffers, streams, local paths or URLs; no conversion is performed. Width, height, animation and audio duration are inferred. Supplied `width`, `height`, `isAnimated`, or `seconds` must match the inferred values (`seconds` is rounded up).
+
+For resource safety, each input is limited to 2 MiB, audio to 30 seconds, and decoded image frames to 16 million pixels total. Validation is limited to two concurrent operations. These are local safeguards, not verified WhatsApp limits. Audio container, codec and duration are parsed, but the audio samples are not fully decoded to verify playback. Invalid inputs detected during validation and upload failures reject the send. The message includes the media-domain metadata and experience ID from the tester's working example; whether they are required is unverified. Quotes, disappearing-message options, status broadcasts and newsletters are not supported by this provisional path. Receive-side normalization, embedded-audio downloads and forwarding have not been implemented. Do not rely on this feature for production until real-client testing is complete.
+
 ## Install
 
 Use the stable version:
