@@ -31,6 +31,7 @@ import type {
 } from '../Types'
 import { WAMessageStatus, WAProto } from '../Types'
 import { isJidGroup, isJidNewsletter, isJidStatusBroadcast, jidNormalizedUser } from '../WABinary'
+import { prepareAudioStickerAssets } from './audio-sticker'
 import { aesEncryptGCM, hmacSign, sha256 } from './crypto'
 import { generateMessageIDV2, getKeyAuthor, unixTimestampSeconds } from './generics'
 import type { ILogger } from './logger'
@@ -558,6 +559,22 @@ export const generateWAMessageContent = async (
 	options: MessageContentGenerationOptions
 ) => {
 	let m: WAMessageContent = {}
+	if (hasNonNullishProperty(message, 'audioSticker')) {
+		const allowed = new Set([
+			'audioSticker',
+			'viewOnce',
+			'viewOnceV2',
+			'viewOnceV2Extension',
+			'ephemeral',
+			'isLottie',
+			'groupStatus',
+			'interactiveAsTemplate'
+		])
+		if (Object.keys(message).some(key => !allowed.has(key))) {
+			throw new Boom('Audio sticker cannot be combined with other message content', { statusCode: 400 })
+		}
+	}
+
 	if (hasNonNullishProperty(message, 'raw')) {
 		return message.raw
 	}
@@ -932,6 +949,61 @@ export const generateWAMessageContent = async (
 			thumbnailHeight: coverImage.height,
 			thumbnailWidth: coverImage.width
 		}
+	} else if (hasNonNullishProperty(message, 'audioSticker')) {
+		if (
+			(options.jid && (isJidNewsletter(options.jid) || isJidStatusBroadcast(options.jid))) ||
+			message.viewOnce ||
+			message.viewOnceV2 ||
+			message.viewOnceV2Extension ||
+			message.ephemeral ||
+			message.isLottie ||
+			message.groupStatus ||
+			message.interactiveAsTemplate
+		) {
+			throw new Boom('Audio stickers do not yet support this destination or message wrapper', { statusCode: 400 })
+		}
+
+		const media = await prepareAudioStickerAssets(message.audioSticker, options.options)
+		const uploadOptions = { ...options, mediaTypeOverride: undefined, mediaCache: undefined }
+		const { stickerMessage } = await prepareWAMessageMedia(
+			{
+				sticker: media.sticker,
+				width: media.width,
+				height: media.height,
+				isAnimated: media.isAnimated
+			},
+			uploadOptions
+		)
+		const { audioMessage } = await prepareWAMessageMedia({ audio: media.audio, seconds: media.seconds }, uploadOptions)
+		if (
+			!stickerMessage?.mediaKey ||
+			!stickerMessage.directPath ||
+			!stickerMessage.url ||
+			!audioMessage?.mediaKey ||
+			!audioMessage.directPath ||
+			!audioMessage.url
+		) {
+			throw new Boom('Audio sticker media upload returned incomplete metadata', { statusCode: 502 })
+		}
+
+		// This context follows the tester's working payload; its necessity is not yet independently verified.
+		stickerMessage.stickerSentTs = Date.now()
+		stickerMessage.accessibilityLabel = message.audioSticker.accessibilityLabel
+		stickerMessage.contextInfo = {
+			mediaDomainInfo: {
+				mediaKeyDomain: proto.MediaKeyDomain.MEDIA_KEY_DOMAIN_E2EE,
+				e2EeMediaKey: stickerMessage.mediaKey
+			},
+			experienceIds: [13001]
+		}
+		audioMessage.contextInfo = {
+			mediaDomainInfo: {
+				mediaKeyDomain: proto.MediaKeyDomain.MEDIA_KEY_DOMAIN_E2EE,
+				e2EeMediaKey: audioMessage.mediaKey
+			}
+		}
+		stickerMessage.audioMessage = audioMessage
+		m = { audioStickerMessage: { message: { stickerMessage } } }
 	} else if (hasNonNullishProperty(message, 'sharePhoneNumber')) {
 		m.protocolMessage = {
 			type: proto.Message.ProtocolMessage.Type.SHARE_PHONE_NUMBER
@@ -1483,6 +1555,10 @@ export const generateWAMessageFromContent = (
 }
 
 export const generateWAMessage = async (jid: string, content: AnyMessageContent, options: MessageGenerationOptions) => {
+	if ('audioSticker' in content && (options.quoted || options.ephemeralExpiration)) {
+		throw new Boom('Audio stickers do not yet support quotes or disappearing messages', { statusCode: 400 })
+	}
+
 	// ensure msg ID is with every log
 	options.logger = options?.logger?.child({ msgId: options.messageId })
 	// Pass jid in the options to generateWAMessageContent

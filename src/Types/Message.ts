@@ -41,6 +41,18 @@ import type { ILogger } from '../Utils/logger'
 export type WAMediaPayloadURL = { url: URL | string }
 export type WAMediaPayloadStream = { stream: Readable }
 export type WAMediaUpload = Buffer | WAMediaPayloadStream | WAMediaPayloadURL
+
+/** Provisional audio sticker input. Audio must be Ogg Opus and the sticker must be WebP. */
+export type AudioStickerContent = {
+	sticker: WAMediaUpload
+	audio: WAMediaUpload
+	isAnimated?: boolean
+	width?: number
+	height?: number
+	seconds?: number
+	accessibilityLabel?: string
+}
+
 /** Set of message types that are supported by the library */
 export type MessageType = keyof proto.Message
 
@@ -420,6 +432,7 @@ export type AnyRegularMessageContent = (
 			Contextable &
 			Editable)
 	| AnyMediaMessageContent
+	| { audioSticker: AudioStickerContent }
 	| { event: EventMessageOptions }
 	| ({
 			poll: PollMessageOptions
