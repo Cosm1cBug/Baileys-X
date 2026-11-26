@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals'
 import { EventEmitter } from 'events'
 import P from 'pino'
+import type { proto } from '../../../WAProto/index.js'
 import type { BinaryNode } from '../../WABinary'
 
 const sentFrames: Uint8Array[] = []
@@ -29,7 +30,7 @@ const { buildRetryResendAddressing, isOwnDeviceJid } = await import('../../Socke
 const { default: makeWASocket } = await import('../../Socket')
 const { DEFAULT_CONNECTION_CONFIG } = await import('../../Defaults')
 const { initAuthCreds } = await import('../../Utils/auth-utils')
-const { decodeBinaryNode } = await import('../../WABinary')
+const { decodeBinaryNode, getBinaryNodeChild } = await import('../../WABinary')
 
 const meId = '5511999999999:4@s.whatsapp.net'
 const meLid = '123456789012345:4@lid'
@@ -98,7 +99,11 @@ describe('relayMessage retry to a single device', () => {
 		throw new Error('frame without a length prefix')
 	}
 
-	const relayRetry = async (destinationJid: string, participantJid: string) => {
+	const relayRetry = async (
+		destinationJid: string,
+		participantJid: string,
+		message: proto.IMessage = { conversation: 'hello' }
+	) => {
 		const creds = initAuthCreds()
 		creds.me = { id: meId, lid: meLid, name: 'Test' }
 		let encryptCalls = 0
@@ -118,15 +123,14 @@ describe('relayMessage retry to a single device', () => {
 
 		try {
 			sentFrames.length = 0
-			await sock.relayMessage(
-				destinationJid,
-				{ conversation: 'hello' },
-				{ messageId: 'RETRY_1', participant: { jid: participantJid, count: 1 } }
-			)
+			await sock.relayMessage(destinationJid, message, {
+				messageId: 'RETRY_1',
+				participant: { jid: participantJid, count: 1 }
+			})
 			const nodes = await Promise.all(sentFrames.map(decodeSentNode))
 			const stanza = nodes.find(node => node.tag === 'message' && node.attrs.id === 'RETRY_1')
 			expect(stanza).toBeDefined()
-			return { attrs: stanza!.attrs, encryptCalls }
+			return { attrs: stanza!.attrs, enc: getBinaryNodeChild(stanza, 'enc'), encryptCalls }
 		} finally {
 			// let the socket's startup tasks settle first, or end() leaves the event buffer timer running
 			await new Promise(resolve => setTimeout(resolve, 50))
@@ -150,5 +154,47 @@ describe('relayMessage retry to a single device', () => {
 		const { attrs, encryptCalls } = await relayRetry('222222222222222@lid', '222222222222222:3@lid')
 		expect(attrs.to).toBe('222222222222222:3@lid')
 		expect(encryptCalls).toBe(1)
+	})
+
+	it.each([
+		['image', { imageMessage: { mimetype: 'image/jpeg' } }, { mediatype: 'image' }],
+		['audio', { audioMessage: { mimetype: 'audio/ogg', ptt: true } }, { mediatype: 'ptt' }],
+		['poll', { pollUpdateMessage: {} }, { 'decrypt-fail': 'hide' }],
+		['reaction', { reactionMessage: { text: 'ok' } }, { 'decrypt-fail': 'hide' }],
+		['pin', { pinInChatMessage: {} }, { 'decrypt-fail': 'hide' }],
+		['wrapped image', { viewOnceMessage: { message: { imageMessage: {} } } }, { mediatype: 'image' }],
+		[
+			'native flow response',
+			{ interactiveResponseMessage: { nativeFlowResponseMessage: { name: 'single_select' } } },
+			{ native_flow_name: 'single_select' }
+		]
+	] satisfies Array<[string, proto.IMessage, Record<string, string>]>)(
+		'preserves %s retry encryption attributes',
+		async (_name, message, expected) => {
+			const { enc, encryptCalls } = await relayRetry('222222222222222@lid', '222222222222222:3@lid', message)
+			expect(enc?.attrs).toMatchObject({ v: '2', type: 'msg', count: '1', ...expected })
+			expect(encryptCalls).toBe(1)
+		}
+	)
+
+	it('preserves image media type on a group retry', async () => {
+		const { enc, encryptCalls } = await relayRetry('120363000000000000@g.us', '222222222222222:3@lid', {
+			imageMessage: { mimetype: 'image/jpeg' }
+		})
+		expect(enc?.attrs).toMatchObject({ v: '2', type: 'msg', count: '1', mediatype: 'image' })
+		expect(encryptCalls).toBe(1)
+	})
+
+	it('preserves decrypt-fail on a group poll retry', async () => {
+		const { enc, encryptCalls } = await relayRetry('120363000000000000@g.us', '222222222222222:3@lid', {
+			pollUpdateMessage: {}
+		})
+		expect(enc?.attrs).toMatchObject({ v: '2', type: 'msg', count: '1', 'decrypt-fail': 'hide' })
+		expect(encryptCalls).toBe(1)
+	})
+
+	it('does not add media or decrypt-fail attributes to a text retry', async () => {
+		const { enc } = await relayRetry('222222222222222@lid', '222222222222222:3@lid')
+		expect(enc?.attrs).toEqual({ v: '2', type: 'msg', count: '1' })
 	})
 })
