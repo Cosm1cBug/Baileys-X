@@ -3,13 +3,7 @@ import { Boom } from '@hapi/boom'
 import { randomBytes } from 'crypto'
 import Long from 'long'
 import { proto } from '../../WAProto/index.js'
-import {
-	DEFAULT_CACHE_TTLS,
-	KEY_BUNDLE_TYPE,
-	MIN_PREKEY_COUNT,
-	PLACEHOLDER_MAX_AGE_SECONDS,
-	STATUS_EXPIRY_SECONDS
-} from '../Defaults'
+import { DEFAULT_CACHE_TTLS, KEY_BUNDLE_TYPE, PLACEHOLDER_MAX_AGE_SECONDS, STATUS_EXPIRY_SECONDS } from '../Defaults'
 import type {
 	GroupParticipant,
 	MessageReceiptType,
@@ -56,6 +50,7 @@ import {
 } from '../Utils'
 import { makeMutex } from '../Utils/make-mutex'
 import { isOfflineNode, makeOfflineNodeProcessor, type MessageType } from '../Utils/offline-node-processor'
+import { handleServerEncryptNotification } from '../Utils/server-encrypt-notification'
 import { buildAckStanza } from '../Utils/stanza-ack'
 import {
 	buildMergedTcTokenIndexWrite,
@@ -880,24 +875,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	const handleEncryptNotification = async (node: BinaryNode) => {
 		const from = node.attrs.from
 		if (from === S_WHATSAPP_NET) {
-			const stanzaId = node.attrs.id
-			if (stanzaId && inFlightPreKeyLow.has(stanzaId)) {
-				return
-			}
-
-			const countChild = getBinaryNodeChild(node, 'count')
-			const count = +countChild!.attrs.value!
-			const shouldUploadMorePreKeys = count < MIN_PREKEY_COUNT
-
-			logger.debug({ count, shouldUploadMorePreKeys }, 'recv pre-key count')
-			if (shouldUploadMorePreKeys) {
-				if (stanzaId) inFlightPreKeyLow.add(stanzaId)
-				try {
-					await uploadPreKeys()
-				} finally {
-					if (stanzaId) inFlightPreKeyLow.delete(stanzaId)
-				}
-			}
+			await handleServerEncryptNotification(node, { query, uploadPreKeys, inFlightPreKeyLow, logger })
 		} else {
 			const result = await handleIdentityChange(node, {
 				meId: authState.creds.me?.id,
