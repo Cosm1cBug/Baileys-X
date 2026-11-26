@@ -755,6 +755,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		}
 
 		const extraAttrs: BinaryNodeAttributes = {}
+		let senderKeyMemoryToSave: Record<string, boolean> | undefined
 
 		if (participant && !isGroup && !isStatus) {
 			additionalAttributes = { ...additionalAttributes, device_fanout: 'false' }
@@ -867,7 +868,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 							// what if sender memory is less accurate than the cached metadata
 							// on participant change in group, we should do sender memory manipulation
 							const result = await authState.keys.get('sender-key-memory', [jid]) // TODO: check out what if the sender key memory doesn't include the LID stuff now?
-							return result[jid] || {}
+							// A store may return a shared object; do not mutate it before the transaction commits.
+							return { ...result[jid] }
 						}
 
 						return {}
@@ -931,7 +933,6 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 						//todo: revamp all this logic
 						// the goal is to follow with what I said above for each group, and instead of a true false map of ids, we can set an array full of those the app has already sent pkmsgs
 						senderKeyRecipients.push(deviceJid)
-						senderKeyMap[deviceJid] = true
 					}
 				}
 
@@ -952,6 +953,10 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					shouldIncludeDeviceIdentity = shouldIncludeDeviceIdentity || result.shouldIncludeDeviceIdentity
 
 					participants.push(...result.nodes)
+					// Failed encryptions remain eligible for sender-key distribution on a later send.
+					for (const node of result.nodes) {
+						if (node.attrs.jid) senderKeyMap[node.attrs.jid] = true
+					}
 				}
 
 				binaryNodeContent.push({
@@ -960,7 +965,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					content: ciphertext
 				})
 
-				await authState.keys.set({ 'sender-key-memory': { [jid]: senderKeyMap } })
+				senderKeyMemoryToSave = senderKeyMap
 			} else {
 				// ADDRESSING CONSISTENCY: Match own identity to conversation context
 				// TODO: investigate if this is true
@@ -1250,6 +1255,10 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			logger.debug({ msgId }, `sending message to ${participants.length} devices`)
 
 			await sendNode(stanza)
+
+			if (senderKeyMemoryToSave) {
+				await authState.keys.set({ 'sender-key-memory': { [jid]: senderKeyMemoryToSave } })
+			}
 
 			// Add message to retry cache if enabled
 			if (messageRetryManager && !participant) {
