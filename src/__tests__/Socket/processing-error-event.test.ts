@@ -116,6 +116,22 @@ describe("'processing.error' event", () => {
 		}
 	})
 
+	it('handles a server post-quantum count notification without a processing error', async () => {
+		const { sock, clear, fire } = await makeSocket()
+		try {
+			const received: ProcessingError[] = []
+			sock.ev.on('processing.error', event => received.push(event))
+			await fire('CB:notification', {
+				tag: 'notification',
+				attrs: { from: 's.whatsapp.net', id: 'PREKEY-1', type: 'encrypt', t: '1700000000' },
+				content: [{ tag: 'pq_count', attrs: { value: '0' } }]
+			})
+			expect(received).toHaveLength(0)
+		} finally {
+			await clear()
+		}
+	})
+
 	it('does not throw when nobody listens', async () => {
 		const { clear, fire } = await makeSocket()
 
