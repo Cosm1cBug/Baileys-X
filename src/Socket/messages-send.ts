@@ -1120,8 +1120,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					attrs: {
 						v: '2',
 						type,
-						count: participant!.count.toString(),
-						...(extraAttrs['decrypt-fail'] ? { 'decrypt-fail': extraAttrs['decrypt-fail'] } : {})
+						...extraAttrs,
+						count: participant!.count.toString()
 					},
 					content: encryptedContent
 				})
