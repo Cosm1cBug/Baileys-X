@@ -1,6 +1,9 @@
 import type { CacheStore } from '../../Types/Socket'
 import { RetryBudget, type RetryBudgetIdentity, retryBudgetKey } from '../../Utils/retry-budget'
-import { makeLegacyRetryBudgetInitializer } from '../../Utils/retry-budget-migration'
+import {
+	makeCachedLegacyRetryBudgetInitializer,
+	makeLegacyRetryBudgetInitializer
+} from '../../Utils/retry-budget-migration'
 
 const identity: RetryBudgetIdentity = { chat: 'chat@g.us', messageId: 'id', participant: null, direction: 'incoming' }
 
@@ -112,6 +115,31 @@ describe('bounded legacy retry migration', () => {
 		store.set = () => false
 		await expect(budget.consume(identity)).rejects.toThrow('Failed to persist')
 		expect(values.has(retryBudgetKey(identity))).toBe(false)
+	})
+
+	it('persists a fixed migration deadline across new initializer instances', async () => {
+		const { store, values } = memoryStore()
+		values.set('id:undefined', 4)
+		let now = 10
+		const first = makeCachedLegacyRetryBudgetInitializer(store, 100, () => now)
+		expect(await first(identity)).toBe(4)
+		expect(values.get('retry:v2:legacy-deadline')).toBe(110)
+		now = 109
+		const second = makeCachedLegacyRetryBudgetInitializer(store, 100, () => now)
+		expect(await second(identity)).toBe(4)
+		now = 110
+		expect(await second(identity)).toBeUndefined()
+		expect(values.get('retry:v2:legacy-deadline')).toBe(110)
+	})
+
+	it('fails closed on corrupt migration deadline and write failures', async () => {
+		const { store, values } = memoryStore()
+		values.set('retry:v2:legacy-deadline', 'invalid')
+		const initialize = makeCachedLegacyRetryBudgetInitializer(store, 100, () => 10)
+		await expect(initialize(identity)).rejects.toThrow('Invalid stored legacy retry migration deadline')
+		values.delete('retry:v2:legacy-deadline')
+		store.set = () => false
+		await expect(initialize(identity)).rejects.toThrow('Failed to persist legacy retry migration deadline')
 	})
 
 	it('validates the configured absolute deadline', () => {

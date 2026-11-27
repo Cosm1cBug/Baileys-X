@@ -37,7 +37,6 @@ const locksByStore = new WeakMap<CacheStore, KeyedMutex>()
  * Core v2 counter. The store is authoritative; outcomes do not modify the budget.
  * Cache expiry/durability are determined by the supplied store, not this class.
  * An optional initializer can seed a missing v2 count; migration policy stays outside this class.
- * The socket does not yet use this budget.
  */
 export class RetryBudget {
 	private readonly locks: KeyedMutex
@@ -57,28 +56,38 @@ export class RetryBudget {
 		this.locks = locks
 	}
 
+	private async readCount(key: string, identity: RetryBudgetIdentity): Promise<number> {
+		const stored = await this.store.get<unknown>(key)
+		const missing = stored === null || stored === undefined
+		const initial = missing && this.initializeMissing ? await this.initializeMissing(identity) : undefined
+		const count = missing ? (initial ?? 0) : stored
+		if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) {
+			throw new Error('Invalid stored retry budget count')
+		}
+
+		if (missing && initial !== null && initial !== undefined) {
+			const result = await this.store.set(key, count)
+			if (result === false) throw new Error('Failed to persist retry budget count')
+		}
+
+		return count
+	}
+
+	/** Inspect without consuming; a legacy count may be persisted on first read. */
+	async peek(identity: RetryBudgetIdentity): Promise<RetryBudgetResult> {
+		const key = retryBudgetKey(identity)
+		return this.locks.mutex(key, async () => {
+			const count = await this.readCount(key, identity)
+			return count >= this.limit ? { accepted: false, count } : { accepted: true, count }
+		})
+	}
+
 	/** Consumes one accepted attempt or reports exhaustion without changing the counter. */
 	async consume(identity: RetryBudgetIdentity): Promise<RetryBudgetResult> {
 		const key = retryBudgetKey(identity)
 		return this.locks.mutex(key, async () => {
-			const stored = await this.store.get<unknown>(key)
-			const missing = stored === null || stored === undefined
-			const initial = missing && this.initializeMissing ? await this.initializeMissing(identity) : undefined
-			const count = missing ? (initial ?? 0) : stored
-			if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) {
-				throw new Error('Invalid stored retry budget count')
-			}
-
-			if (count >= this.limit) {
-				// Persist migrated exhausted counts before the migration window ends.
-				if (missing && initial !== null && initial !== undefined) {
-					const result = await this.store.set(key, count)
-					if (result === false) throw new Error('Failed to persist retry budget count')
-				}
-
-				return { accepted: false, count }
-			}
-
+			const count = await this.readCount(key, identity)
+			if (count >= this.limit) return { accepted: false, count }
 			const next = count + 1
 			const result = await this.store.set(key, next)
 			if (result === false) throw new Error('Failed to persist retry budget count')
