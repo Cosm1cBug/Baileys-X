@@ -46,6 +46,7 @@ import {
 	signedKeyPair,
 	xmppSignedPreKey
 } from '../Utils'
+import { makeOfflineBatchRequester } from '../Utils/offline-batch'
 import {
 	assertNodeErrorFree,
 	type BinaryNode,
@@ -414,6 +415,12 @@ export const makeSocket = (config: SocketConfig) => {
 		}
 	}
 
+	const offlineBatchRequester = makeOfflineBatchRequester({
+		sendBatch: () => sendNode({ tag: 'ib', attrs: {}, content: [{ tag: 'offline_batch', attrs: { count: '100' } }] }),
+		isPaused: () => ws.isPaused,
+		onError: error => onUnexpectedError(error, 'requesting offline batch')
+	})
+
 	/** await the next incoming message */
 	const awaitNextMessage = async <T>(sendMsg?: Uint8Array) => {
 		if (!ws.isOpen) {
@@ -607,6 +614,7 @@ export const makeSocket = (config: SocketConfig) => {
 
 			let anyTriggered = false
 
+			offlineBatchRequester.observe(frame)
 			anyTriggered = ws.emit('frame', frame)
 			// if it's a binary node
 			if (!(frame instanceof Uint8Array)) {
@@ -646,6 +654,7 @@ export const makeSocket = (config: SocketConfig) => {
 		}
 
 		closed = true
+		offlineBatchRequester.stop()
 		logger.info({ trace: error?.stack }, error ? 'connection errored' : 'connection closed')
 
 		clearInterval(keepAliveReq)
@@ -1110,13 +1119,9 @@ export const makeSocket = (config: SocketConfig) => {
 		void end(new Boom('Multi-device beta not joined', { statusCode: DisconnectReason.multideviceMismatch }))
 	})
 
-	ws.on('CB:ib,,offline_preview', async (node: BinaryNode) => {
+	ws.on('CB:ib,,offline_preview', (node: BinaryNode) => {
 		logger.info({ node }, 'offline preview received')
-		await sendNode({
-			tag: 'ib',
-			attrs: {},
-			content: [{ tag: 'offline_batch', attrs: { count: '100' } }]
-		})
+		offlineBatchRequester.start()
 	})
 
 	ws.on('CB:ib,,edge_routing', (node: BinaryNode) => {
@@ -1166,6 +1171,7 @@ export const makeSocket = (config: SocketConfig) => {
 
 	// called when all offline notifs are handled
 	ws.on('CB:ib,,offline', (node: BinaryNode) => {
+		offlineBatchRequester.stop()
 		if (initialBufferTimer) {
 			clearTimeout(initialBufferTimer)
 			initialBufferTimer = undefined
