@@ -36,14 +36,16 @@ const locksByStore = new WeakMap<CacheStore, KeyedMutex>()
 /**
  * Core v2 counter. The store is authoritative; outcomes do not modify the budget.
  * Cache expiry/durability are determined by the supplied store, not this class.
- * No legacy lookup or socket integration is performed by this core layer.
+ * An optional initializer can seed a missing v2 count; migration policy stays outside this class.
+ * The socket does not yet use this budget.
  */
 export class RetryBudget {
 	private readonly locks: KeyedMutex
 
 	constructor(
 		private readonly store: CacheStore,
-		private readonly limit: number
+		private readonly limit: number,
+		private readonly initializeMissing?: (identity: RetryBudgetIdentity) => Promise<unknown>
 	) {
 		if (!Number.isSafeInteger(limit) || limit < 0) throw new Error('Invalid retry budget limit')
 		let locks = locksByStore.get(store)
@@ -60,12 +62,23 @@ export class RetryBudget {
 		const key = retryBudgetKey(identity)
 		return this.locks.mutex(key, async () => {
 			const stored = await this.store.get<unknown>(key)
-			const count = stored === null || stored === undefined ? 0 : stored
+			const missing = stored === null || stored === undefined
+			const initial = missing && this.initializeMissing ? await this.initializeMissing(identity) : undefined
+			const count = missing ? (initial ?? 0) : stored
 			if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) {
 				throw new Error('Invalid stored retry budget count')
 			}
 
-			if (count >= this.limit) return { accepted: false, count }
+			if (count >= this.limit) {
+				// Persist migrated exhausted counts before the migration window ends.
+				if (missing && initial !== null && initial !== undefined) {
+					const result = await this.store.set(key, count)
+					if (result === false) throw new Error('Failed to persist retry budget count')
+				}
+
+				return { accepted: false, count }
+			}
+
 			const next = count + 1
 			const result = await this.store.set(key, next)
 			if (result === false) throw new Error('Failed to persist retry budget count')
