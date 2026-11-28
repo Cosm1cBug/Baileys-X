@@ -183,6 +183,24 @@ describe('addTransactionCapability', () => {
 		expect(await raw.get('sender-key-memory', ['a', 'b'])).toEqual({})
 	})
 
+	it('rolls back a completed nested wrapper when the outer transaction fails', async () => {
+		const raw = makeInMemoryStore()
+		const opts = { maxCommitRetries: 1, delayBetweenTriesMs: 5 }
+		const a = addTransactionCapability(raw, makeTestLogger(), opts)
+		const b = addTransactionCapability(raw, makeTestLogger(), opts)
+
+		await expect(
+			a.transaction(async () => {
+				await a.set({ 'sender-key-memory': { a: { first: true } } })
+				await b.transaction(async () => {
+					await b.set({ 'sender-key-memory': { b: { second: true } } })
+				}, 'inner')
+				throw new Error('outer failure')
+			}, 'outer')
+		).rejects.toThrow('outer failure')
+		expect(await raw.get('sender-key-memory', ['a', 'b'])).toEqual({})
+	})
+
 	it('serializes transactions from two separate wrappers over the same store', async () => {
 		const raw = makeInMemoryStore()
 		await raw.set({ 'sender-key-memory': { group1: { deviceA: true } } })
