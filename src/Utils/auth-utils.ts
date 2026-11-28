@@ -112,8 +112,10 @@ export function makeCacheableSignalKeyStore(
 	}
 }
 
-// Shared across wrapper instances, keyed by the raw store itself
+// Wrappers over the same raw store share both serialization and nested context.
+// Weak keys avoid retaining a store solely because it was wrapped.
 const txMutexesByStore = new WeakMap<SignalKeyStore, Mutex>()
+const txTokensByStore = new WeakMap<SignalKeyStore, symbol>()
 
 /**
  * Adds DB-like transaction capability to the SignalKeyStore
@@ -127,8 +129,14 @@ export const addTransactionCapability = (
 	logger: ILogger,
 	{ maxCommitRetries, delayBetweenTriesMs }: TransactionCapabilityOptions
 ): SignalKeyStoreWithTransaction => {
-	const storeToken = Symbol('signalTxStore')
-	const getContext = () => txStorage.getStore()?.get(storeToken)
+	let storeToken = txTokensByStore.get(state)
+	if (!storeToken) {
+		storeToken = Symbol('signalTxStore')
+		txTokensByStore.set(state, storeToken)
+	}
+
+	const token = storeToken
+	const getContext = () => txStorage.getStore()?.get(token)
 
 	// Queues for concurrency control (keyed by signal data type - bounded set)
 	const keyQueues = new Map<string, PQueue>()
@@ -294,7 +302,7 @@ export const addTransactionCapability = (
 			void key // trace-log-unsafe (callers embed JIDs in it) - kept for type compat only
 
 			const stores = txStorage.getStore()
-			const existing = stores?.get(storeToken)
+			const existing = stores?.get(token)
 
 			// Nested transaction - reuse existing context
 			if (existing) {
@@ -314,7 +322,7 @@ export const addTransactionCapability = (
 
 				try {
 					const next = new Map(stores)
-					next.set(storeToken, ctx)
+					next.set(token, ctx)
 					const result = await txStorage.run(next, work)
 
 					// Commit mutations
