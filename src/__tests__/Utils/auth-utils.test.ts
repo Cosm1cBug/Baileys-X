@@ -10,6 +10,7 @@ import type {
 import {
 	addTransactionCapability,
 	assertMeId,
+	ClosedTransactionContextError,
 	CrossStoreTransactionConflictError,
 	initAuthCreds
 } from '../../Utils/auth-utils'
@@ -217,6 +218,71 @@ describe('addTransactionCapability', () => {
 
 		const final = await runInterleavingScenario(raw, stateA, stateB)
 		expect(final.group1).toEqual({ deviceA: true, deviceB: true, deviceC: true })
+	})
+})
+
+describe('closed transaction contexts', () => {
+	it('rejects detached reads, writes, and nested transactions after commit', async () => {
+		const raw = makeInMemoryStore()
+		const opts = { maxCommitRetries: 1, delayBetweenTriesMs: 5 }
+		const a = addTransactionCapability(raw, makeTestLogger(), opts)
+		const b = addTransactionCapability(raw, makeTestLogger(), opts)
+		const trigger = deferred()
+		let detached!: Promise<PromiseSettledResult<unknown>[]>
+		await a.transaction(async () => {
+			await a.set({ 'sender-key-memory': { saved: { ok: true } } })
+			detached = (async () => {
+				await trigger.promise
+				return Promise.allSettled([
+					b.set({ 'sender-key-memory': { lost: { wrong: true } } }),
+					b.get('sender-key-memory', ['saved']),
+					b.transaction(async () => {}, 'nested')
+				])
+			})()
+		}, 'outer')
+		trigger.resolve()
+		const results = await detached
+		for (const result of results) {
+			expect(result.status).toBe('rejected')
+			if (result.status === 'rejected') expect(result.reason).toBeInstanceOf(ClosedTransactionContextError)
+		}
+
+		expect(await raw.get('sender-key-memory', ['saved', 'lost'])).toEqual({ saved: { ok: true } })
+	})
+
+	it('rejects detached writes during the asynchronous commit', async () => {
+		const raw = makeInMemoryStore()
+		const originalSet = raw.set.bind(raw)
+		const commitStarted = deferred()
+		const finishCommit = deferred()
+		raw.set = async data => {
+			commitStarted.resolve()
+			await finishCommit.promise
+			await originalSet(data)
+		}
+
+		const state = addTransactionCapability(raw, makeTestLogger(), { maxCommitRetries: 1, delayBetweenTriesMs: 1 })
+		const trigger = deferred()
+		let detached!: Promise<PromiseSettledResult<void>[]>
+		const outer = state.transaction(async () => {
+			await state.set({ 'sender-key-memory': { saved: { ok: true } } })
+			detached = (async () => {
+				await trigger.promise
+				return Promise.allSettled([state.set({ 'sender-key-memory': { lost: { wrong: true } } })])
+			})()
+		}, 'outer')
+		await commitStarted.promise
+		try {
+			trigger.resolve()
+			const [result] = await detached
+			expect(result?.status).toBe('rejected')
+			if (result?.status === 'rejected') expect(result.reason).toBeInstanceOf(ClosedTransactionContextError)
+		} finally {
+			finishCommit.resolve()
+			await outer
+		}
+
+		expect(await raw.get('sender-key-memory', ['saved', 'lost'])).toEqual({ saved: { ok: true } })
 	})
 })
 

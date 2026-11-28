@@ -101,6 +101,8 @@ export type SignalKeyStoreWithTransaction = SignalKeyStore & {
 	 * The built-in wrapper rejects with CrossStoreTransactionConflictError when
 	 * nested work would wait on a different busy raw store. This may happen even
 	 * without a cycle; no automatic retry or cross-store atomicity is provided.
+	 * Await all work in the callback: detached work that later uses its closed
+	 * context rejects with ClosedTransactionContextError instead of buffering writes.
 	 */
 	transaction<T>(exec: () => Promise<T>, key: string): Promise<T>
 	/** @deprecated Retained for compatibility; shared transaction storage needs no per-socket disposal. */

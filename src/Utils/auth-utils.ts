@@ -33,6 +33,8 @@ const txStorage = new AsyncLocalStorage<Map<symbol, TransactionContext>>()
 // Detached async work can inherit an already-finished context; only contexts
 // whose transaction still holds its mutex count for cross-store contention.
 const activeTransactionContexts = new WeakSet<TransactionContext>()
+// Only accept reads and writes while the transaction callback is still running.
+const openTransactionContexts = new WeakSet<TransactionContext>()
 
 /**
  * Adds caching capability to a SignalKeyStore
@@ -128,6 +130,14 @@ export class CrossStoreTransactionConflictError extends Error {
 	}
 }
 
+/** Detached work attempted to use a transaction after its callback finished. */
+export class ClosedTransactionContextError extends Error {
+	constructor() {
+		super('Signal transaction context is closed; await all work inside the transaction callback')
+		this.name = 'ClosedTransactionContextError'
+	}
+}
+
 /**
  * Adds DB-like transaction capability to the SignalKeyStore
  * Uses AsyncLocalStorage for automatic context management
@@ -147,7 +157,11 @@ export const addTransactionCapability = (
 	}
 
 	const token = storeToken
-	const getContext = () => txStorage.getStore()?.get(token)
+	const getContext = () => {
+		const context = txStorage.getStore()?.get(token)
+		if (context && !openTransactionContexts.has(context)) throw new ClosedTransactionContextError()
+		return context
+	}
 
 	// Queues for concurrency control (keyed by signal data type - bounded set)
 	const keyQueues = new Map<string, PQueue>()
@@ -313,7 +327,7 @@ export const addTransactionCapability = (
 			void key // trace-log-unsafe (callers embed JIDs in it) - kept for type compat only
 
 			const stores = txStorage.getStore()
-			const existing = stores?.get(token)
+			const existing = getContext()
 
 			// Nested transaction - reuse existing context
 			if (existing) {
@@ -340,11 +354,13 @@ export const addTransactionCapability = (
 
 				logger.trace('entering transaction')
 				activeTransactionContexts.add(ctx)
+				openTransactionContexts.add(ctx)
 
 				try {
 					const next = new Map(stores)
 					next.set(token, ctx)
 					const result = await txStorage.run(next, work)
+					openTransactionContexts.delete(ctx)
 
 					// Commit mutations
 					await commitWithRetry(ctx.mutations)
@@ -356,6 +372,7 @@ export const addTransactionCapability = (
 					logger.error({ error }, 'transaction failed, rolling back')
 					throw error
 				} finally {
+					openTransactionContexts.delete(ctx)
 					activeTransactionContexts.delete(ctx)
 				}
 			})
