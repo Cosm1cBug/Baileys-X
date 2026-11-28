@@ -127,6 +127,7 @@ function setup(store: CacheStore, maxMsgRetryCount = 2, enableManager = false) {
 		assertSessions,
 		onUnexpectedError,
 		manager,
+		coordinator,
 		close: async () => {
 			await close?.()
 			manager?.clear()
@@ -227,6 +228,100 @@ describe('socket retry budget integration', () => {
 		}
 	})
 
+	it('does not consume or prepare a session when invalidated during a budget lookup', async () => {
+		const { store, values } = memoryStore()
+		const key = retryBudgetKey({ chat, messageId: id, participant, direction: 'outgoing' })
+		const originalGet = store.get.bind(store)
+		let started!: () => void
+		const lookupStarted = new Promise<void>(resolve => {
+			started = resolve
+		})
+		let resume!: () => void
+		const gate = new Promise<void>(resolve => {
+			resume = resolve
+		})
+		store.get = async <T>(cacheKey: string) => {
+			if (cacheKey === key) {
+				started()
+				await gate
+			}
+
+			return (await originalGet<T>(cacheKey)) as T
+		}
+
+		const socket = setup(store)
+		try {
+			const handling = Promise.resolve(socket.handlers.get('CB:receipt')!(makeReceipt()))
+			await lookupStarted
+			socket.coordinator.invalidateMessage(chat, id)
+			resume()
+			await handling
+			expect(socket.assertSessions).not.toHaveBeenCalled()
+			expect(socket.relayMessage).not.toHaveBeenCalled()
+			expect(values.has(key)).toBe(false)
+		} finally {
+			resume()
+			await socket.close()
+		}
+	})
+
+	it('does not relay when invalidated during consumption, but retains the committed count', async () => {
+		const { store, values } = memoryStore()
+		const key = retryBudgetKey({ chat, messageId: id, participant, direction: 'outgoing' })
+		const originalSet = store.set.bind(store)
+		let started!: () => void
+		const writeStarted = new Promise<void>(resolve => {
+			started = resolve
+		})
+		let resume!: () => void
+		const gate = new Promise<void>(resolve => {
+			resume = resolve
+		})
+		store.set = async (cacheKey, value) => {
+			await originalSet(cacheKey, value)
+			if (cacheKey === key) {
+				started()
+				await gate
+			}
+		}
+
+		const socket = setup(store)
+		try {
+			const handling = Promise.resolve(socket.handlers.get('CB:receipt')!(makeReceipt()))
+			await writeStarted
+			socket.coordinator.invalidateMessage(chat, id)
+			resume()
+			await handling
+			expect(socket.relayMessage).not.toHaveBeenCalled()
+			expect(values.get(key)).toBe(1)
+		} finally {
+			resume()
+			await socket.close()
+		}
+	})
+
+	it('surfaces a budget storage failure without relaying', async () => {
+		const { store } = memoryStore()
+		const originalSet = store.set.bind(store)
+		const key = retryBudgetKey({ chat, messageId: id, participant, direction: 'outgoing' })
+		store.set = (cacheKey, value) => {
+			if (cacheKey === key) throw new Error('storage unavailable')
+			return originalSet(cacheKey, value)
+		}
+
+		const socket = setup(store)
+		try {
+			await socket.handlers.get('CB:receipt')!(makeReceipt())
+			expect(socket.relayMessage).not.toHaveBeenCalled()
+			expect(socket.onUnexpectedError).toHaveBeenCalledWith(
+				expect.objectContaining({ message: 'storage unavailable' }),
+				'sending message again'
+			)
+		} finally {
+			await socket.close()
+		}
+	})
+
 	it('uses an incoming budget independently of outgoing and retains its limit', async () => {
 		const { store, values } = memoryStore()
 		const socket = setup(store, 1, true)
@@ -235,6 +330,9 @@ describe('socket retry budget integration', () => {
 			await socket.sock.sendRetryRequest(node)
 			await socket.sock.sendRetryRequest(node)
 			expect(socket.sendNode).toHaveBeenCalledTimes(1)
+			const receipt = socket.sendNode.mock.calls[0]![0]
+			const retry = (receipt.content as BinaryNode[]).find(child => child.tag === 'retry')
+			expect(retry?.attrs.count).toBe('1')
 			expect(values.get(retryBudgetKey({ chat, messageId: id, participant, direction: 'incoming' }))).toBe(1)
 			await socket.handlers.get('CB:receipt')!(makeReceipt())
 			expect(socket.relayMessage).toHaveBeenCalledTimes(1)
