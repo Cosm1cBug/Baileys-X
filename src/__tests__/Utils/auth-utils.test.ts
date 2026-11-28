@@ -7,7 +7,13 @@ import type {
 	SignalKeyStore,
 	SignalKeyStoreWithTransaction
 } from '../../Types'
-import { addTransactionCapability, assertMeId, initAuthCreds } from '../../Utils/auth-utils'
+import {
+	addTransactionCapability,
+	assertMeId,
+	ClosedTransactionContextError,
+	CrossStoreTransactionConflictError,
+	initAuthCreds
+} from '../../Utils/auth-utils'
 import type { ILogger } from '../../Utils/logger'
 
 const credsWithMe = (me?: Partial<Contact>): AuthenticationCreds => ({
@@ -215,7 +221,149 @@ describe('addTransactionCapability', () => {
 	})
 })
 
+describe('closed transaction contexts', () => {
+	it('rejects detached reads, writes, and nested transactions after commit', async () => {
+		const raw = makeInMemoryStore()
+		const opts = { maxCommitRetries: 1, delayBetweenTriesMs: 5 }
+		const a = addTransactionCapability(raw, makeTestLogger(), opts)
+		const b = addTransactionCapability(raw, makeTestLogger(), opts)
+		const trigger = deferred()
+		let detached!: Promise<PromiseSettledResult<unknown>[]>
+		await a.transaction(async () => {
+			await a.set({ 'sender-key-memory': { saved: { ok: true } } })
+			detached = (async () => {
+				await trigger.promise
+				return Promise.allSettled([
+					b.set({ 'sender-key-memory': { lost: { wrong: true } } }),
+					b.get('sender-key-memory', ['saved']),
+					b.transaction(async () => {}, 'nested')
+				])
+			})()
+		}, 'outer')
+		trigger.resolve()
+		const results = await detached
+		for (const result of results) {
+			expect(result.status).toBe('rejected')
+			if (result.status === 'rejected') expect(result.reason).toBeInstanceOf(ClosedTransactionContextError)
+		}
+
+		expect(await raw.get('sender-key-memory', ['saved', 'lost'])).toEqual({ saved: { ok: true } })
+	})
+
+	it('rejects detached writes during the asynchronous commit', async () => {
+		const raw = makeInMemoryStore()
+		const originalSet = raw.set.bind(raw)
+		const commitStarted = deferred()
+		const finishCommit = deferred()
+		raw.set = async data => {
+			commitStarted.resolve()
+			await finishCommit.promise
+			await originalSet(data)
+		}
+
+		const state = addTransactionCapability(raw, makeTestLogger(), { maxCommitRetries: 1, delayBetweenTriesMs: 1 })
+		const trigger = deferred()
+		let detached!: Promise<PromiseSettledResult<void>[]>
+		const outer = state.transaction(async () => {
+			await state.set({ 'sender-key-memory': { saved: { ok: true } } })
+			detached = (async () => {
+				await trigger.promise
+				return Promise.allSettled([state.set({ 'sender-key-memory': { lost: { wrong: true } } })])
+			})()
+		}, 'outer')
+		await commitStarted.promise
+		try {
+			trigger.resolve()
+			const [result] = await detached
+			expect(result?.status).toBe('rejected')
+			if (result?.status === 'rejected') expect(result.reason).toBeInstanceOf(ClosedTransactionContextError)
+		} finally {
+			finishCommit.resolve()
+			await outer
+		}
+
+		expect(await raw.get('sender-key-memory', ['saved', 'lost'])).toEqual({ saved: { ok: true } })
+	})
+})
+
 describe('transaction context isolation between stores', () => {
+	it('fails explicitly rather than deadlocking when stores are nested in opposing order', async () => {
+		const opts = { maxCommitRetries: 1, delayBetweenTriesMs: 5 }
+		const a = addTransactionCapability(makeInMemoryStore(), makeTestLogger(), opts)
+		const b = addTransactionCapability(makeInMemoryStore(), makeTestLogger(), opts)
+		const aStarted = deferred()
+		const bStarted = deferred()
+		const left = a.transaction(async () => {
+			aStarted.resolve()
+			await bStarted.promise
+			await b.transaction(async () => {}, 'inner-b')
+		}, 'outer-a')
+		const right = b.transaction(async () => {
+			bStarted.resolve()
+			await aStarted.promise
+			await a.transaction(async () => {}, 'inner-a')
+		}, 'outer-b')
+		const results = await Promise.allSettled([left, right])
+		const rejected = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+		expect(rejected.length).toBeGreaterThanOrEqual(1)
+		for (const result of rejected) expect(result.reason).toBeInstanceOf(CrossStoreTransactionConflictError)
+	})
+
+	it('rolls back the outer store if a different busy store cannot be entered', async () => {
+		const rawA = makeInMemoryStore()
+		const rawB = makeInMemoryStore()
+		const opts = { maxCommitRetries: 1, delayBetweenTriesMs: 5 }
+		const a = addTransactionCapability(rawA, makeTestLogger(), opts)
+		const b = addTransactionCapability(rawB, makeTestLogger(), opts)
+		const started = deferred()
+		const release = deferred()
+		const busy = b.transaction(async () => {
+			started.resolve()
+			await release.promise
+		}, 'busy')
+		await started.promise
+		try {
+			await expect(
+				a.transaction(async () => {
+					await a.set({ 'sender-key-memory': { a: { changed: true } } })
+					await b.transaction(async () => {
+						throw new Error('must not run')
+					}, 'nested')
+				}, 'outer')
+			).rejects.toBeInstanceOf(CrossStoreTransactionConflictError)
+			expect(await rawA.get('sender-key-memory', ['a'])).toEqual({})
+		} finally {
+			release.resolve()
+			await busy
+		}
+	})
+
+	it('lets detached work with an expired context wait like an independent transaction', async () => {
+		const opts = { maxCommitRetries: 1, delayBetweenTriesMs: 5 }
+		const a = addTransactionCapability(makeInMemoryStore(), makeTestLogger(), opts)
+		const b = addTransactionCapability(makeInMemoryStore(), makeTestLogger(), opts)
+		const trigger = deferred()
+		let detached!: Promise<string>
+		await a.transaction(async () => {
+			detached = (async () => {
+				await trigger.promise
+				return b.transaction(async () => 'completed', 'detached')
+			})()
+		}, 'a')
+		const started = deferred()
+		const release = deferred()
+		const busy = b.transaction(async () => {
+			started.resolve()
+			await release.promise
+		}, 'busy')
+		await started.promise
+		trigger.resolve()
+		await flushMicrotasks()
+		release.resolve()
+		await busy
+		expect(await detached).toBe('completed')
+	})
+
 	it('preserves each store context through nested transactions and disposal', async () => {
 		const rawA = makeInMemoryStore()
 		const rawB = makeInMemoryStore()

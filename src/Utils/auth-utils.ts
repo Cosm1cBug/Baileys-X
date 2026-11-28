@@ -30,6 +30,11 @@ interface TransactionContext {
 
 // Share one async-local instance across wrappers while keeping each store isolated.
 const txStorage = new AsyncLocalStorage<Map<symbol, TransactionContext>>()
+// Detached async work can inherit an already-finished context; only contexts
+// whose transaction still holds its mutex count for cross-store contention.
+const activeTransactionContexts = new WeakSet<TransactionContext>()
+// Only accept reads and writes while the transaction callback is still running.
+const openTransactionContexts = new WeakSet<TransactionContext>()
 
 /**
  * Adds caching capability to a SignalKeyStore
@@ -117,6 +122,22 @@ export function makeCacheableSignalKeyStore(
 const txMutexesByStore = new WeakMap<SignalKeyStore, Mutex>()
 const txTokensByStore = new WeakMap<SignalKeyStore, symbol>()
 
+/** A nested transaction cannot safely wait for a different busy store. */
+export class CrossStoreTransactionConflictError extends Error {
+	constructor() {
+		super('Cannot enter a busy Signal store from another store transaction')
+		this.name = 'CrossStoreTransactionConflictError'
+	}
+}
+
+/** Detached work attempted to use a transaction after its callback finished. */
+export class ClosedTransactionContextError extends Error {
+	constructor() {
+		super('Signal transaction context is closed; await all work inside the transaction callback')
+		this.name = 'ClosedTransactionContextError'
+	}
+}
+
 /**
  * Adds DB-like transaction capability to the SignalKeyStore
  * Uses AsyncLocalStorage for automatic context management
@@ -136,7 +157,11 @@ export const addTransactionCapability = (
 	}
 
 	const token = storeToken
-	const getContext = () => txStorage.getStore()?.get(token)
+	const getContext = () => {
+		const context = txStorage.getStore()?.get(token)
+		if (context && !openTransactionContexts.has(context)) throw new ClosedTransactionContextError()
+		return context
+	}
 
 	// Queues for concurrency control (keyed by signal data type - bounded set)
 	const keyQueues = new Map<string, PQueue>()
@@ -302,7 +327,7 @@ export const addTransactionCapability = (
 			void key // trace-log-unsafe (callers embed JIDs in it) - kept for type compat only
 
 			const stores = txStorage.getStore()
-			const existing = stores?.get(token)
+			const existing = getContext()
 
 			// Nested transaction - reuse existing context
 			if (existing) {
@@ -310,7 +335,16 @@ export const addTransactionCapability = (
 				return work()
 			}
 
-			// New transaction - acquire mutex and create context
+			// A nested transaction must not wait for a busy different store: the
+			// owner may itself be waiting for a store held by this async chain.
+			// This is intentionally conservative, even when there is no cycle.
+			const holdsAnotherStore = stores && [...stores.values()].some(context => activeTransactionContexts.has(context))
+			if (holdsAnotherStore && txMutex.isLocked()) {
+				throw new CrossStoreTransactionConflictError()
+			}
+
+			// No await between the check and acquisition: another call in this
+			// process cannot take the mutex in between.
 			return await txMutex.runExclusive(async () => {
 				const ctx: TransactionContext = {
 					cache: {},
@@ -319,11 +353,14 @@ export const addTransactionCapability = (
 				}
 
 				logger.trace('entering transaction')
+				activeTransactionContexts.add(ctx)
+				openTransactionContexts.add(ctx)
 
 				try {
 					const next = new Map(stores)
 					next.set(token, ctx)
 					const result = await txStorage.run(next, work)
+					openTransactionContexts.delete(ctx)
 
 					// Commit mutations
 					await commitWithRetry(ctx.mutations)
@@ -334,6 +371,9 @@ export const addTransactionCapability = (
 				} catch (error) {
 					logger.error({ error }, 'transaction failed, rolling back')
 					throw error
+				} finally {
+					openTransactionContexts.delete(ctx)
+					activeTransactionContexts.delete(ctx)
 				}
 			})
 		},
