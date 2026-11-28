@@ -30,6 +30,9 @@ interface TransactionContext {
 
 // Share one async-local instance across wrappers while keeping each store isolated.
 const txStorage = new AsyncLocalStorage<Map<symbol, TransactionContext>>()
+// Detached async work can inherit an already-finished context; only contexts
+// whose transaction still holds its mutex count for cross-store contention.
+const activeTransactionContexts = new WeakSet<TransactionContext>()
 
 /**
  * Adds caching capability to a SignalKeyStore
@@ -116,6 +119,14 @@ export function makeCacheableSignalKeyStore(
 // Weak keys avoid retaining a store solely because it was wrapped.
 const txMutexesByStore = new WeakMap<SignalKeyStore, Mutex>()
 const txTokensByStore = new WeakMap<SignalKeyStore, symbol>()
+
+/** A nested transaction cannot safely wait for a different busy store. */
+export class CrossStoreTransactionConflictError extends Error {
+	constructor() {
+		super('Cannot enter a busy Signal store from another store transaction')
+		this.name = 'CrossStoreTransactionConflictError'
+	}
+}
 
 /**
  * Adds DB-like transaction capability to the SignalKeyStore
@@ -310,7 +321,16 @@ export const addTransactionCapability = (
 				return work()
 			}
 
-			// New transaction - acquire mutex and create context
+			// A nested transaction must not wait for a busy different store: the
+			// owner may itself be waiting for a store held by this async chain.
+			// This is intentionally conservative, even when there is no cycle.
+			const holdsAnotherStore = stores && [...stores.values()].some(context => activeTransactionContexts.has(context))
+			if (holdsAnotherStore && txMutex.isLocked()) {
+				throw new CrossStoreTransactionConflictError()
+			}
+
+			// No await between the check and acquisition: another call in this
+			// process cannot take the mutex in between.
 			return await txMutex.runExclusive(async () => {
 				const ctx: TransactionContext = {
 					cache: {},
@@ -319,6 +339,7 @@ export const addTransactionCapability = (
 				}
 
 				logger.trace('entering transaction')
+				activeTransactionContexts.add(ctx)
 
 				try {
 					const next = new Map(stores)
@@ -334,6 +355,8 @@ export const addTransactionCapability = (
 				} catch (error) {
 					logger.error({ error }, 'transaction failed, rolling back')
 					throw error
+				} finally {
+					activeTransactionContexts.delete(ctx)
 				}
 			})
 		},
