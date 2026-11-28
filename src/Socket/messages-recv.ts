@@ -1631,7 +1631,11 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 				messageRetryManager?.markRetrySuccess(id, remoteJid)
 			}
 
-			await resend()
+			try {
+				await resend()
+			} catch (error: unknown) {
+				onUnexpectedError(error instanceof Error ? error : new Error(String(error)), `sending message again (${id})`)
+			}
 		}
 	}
 

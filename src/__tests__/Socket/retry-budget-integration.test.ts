@@ -220,9 +220,29 @@ describe('socket retry budget integration', () => {
 			expect(socket.relayMessage).toHaveBeenCalledTimes(1)
 			expect(socket.onUnexpectedError).toHaveBeenCalledWith(
 				expect.objectContaining({ message: 'relay failed' }),
-				'sending message again'
+				`sending message again (${id})`
 			)
 			expect(values.get(retryBudgetKey({ chat, messageId: id, participant, direction: 'outgoing' }))).toBe(1)
+		} finally {
+			await socket.close()
+		}
+	})
+
+	it('continues with later message IDs after a relay failure', async () => {
+		const { store, values } = memoryStore()
+		const socket = setup(store, 2)
+		try {
+			socket.relayMessage.mockRejectedValueOnce(new Error('first relay failed'))
+			const receipt = makeReceipt()
+			const retry = (receipt.content as BinaryNode[])[0]!
+			retry.content = [{ tag: 'item', attrs: { id: 'second-id' } }]
+			await socket.handlers.get('CB:receipt')!(receipt)
+			expect(socket.relayMessage).toHaveBeenCalledTimes(2)
+			expect(socket.onUnexpectedError).toHaveBeenCalledWith(
+				expect.objectContaining({ message: 'first relay failed' }),
+				`sending message again (${id})`
+			)
+			expect(values.get(retryBudgetKey({ chat, messageId: 'second-id', participant, direction: 'outgoing' }))).toBe(1)
 		} finally {
 			await socket.close()
 		}
@@ -315,7 +335,7 @@ describe('socket retry budget integration', () => {
 			expect(socket.relayMessage).not.toHaveBeenCalled()
 			expect(socket.onUnexpectedError).toHaveBeenCalledWith(
 				expect.objectContaining({ message: 'storage unavailable' }),
-				'sending message again'
+				`sending message again (${id})`
 			)
 		} finally {
 			await socket.close()
