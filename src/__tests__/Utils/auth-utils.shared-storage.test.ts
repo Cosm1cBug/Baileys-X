@@ -25,4 +25,26 @@ describe('shared transaction storage', () => {
 
 		expect(constructed).toBe(before)
 	})
+
+	it('does not allocate more async-local instances as wrapped stores transact and dispose', async () => {
+		const before = constructed
+		const logger = { trace: () => {}, warn: () => {}, error: () => {} } as unknown as ILogger
+		let commits = 0
+		for (let i = 0; i < 100; i++) {
+			const store: SignalKeyStore = {
+				get: async () => ({}),
+				set: async () => {
+					commits++
+				}
+			}
+			const wrapped = addTransactionCapability(store, logger, { maxCommitRetries: 1, delayBetweenTriesMs: 1 })
+			await wrapped.transaction(async () => {
+				await wrapped.set({ 'sender-key-memory': { group: { device: true } } })
+			}, 'synthetic')
+			wrapped.disposeTransactionStorage()
+		}
+
+		expect(commits).toBe(100)
+		expect(constructed).toBe(before)
+	})
 })
