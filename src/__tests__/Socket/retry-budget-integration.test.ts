@@ -66,6 +66,7 @@ function setup(store: CacheStore, maxMsgRetryCount = 2, enableManager = false) {
 	const relayMessage = jest.fn<() => Promise<void>>().mockResolvedValue(undefined)
 	const getMessage = jest.fn<() => Promise<proto.IMessage | undefined>>().mockResolvedValue({ conversation: 'hello' })
 	const onUnexpectedError = jest.fn()
+	const assertSessions = jest.fn<() => Promise<boolean>>().mockResolvedValue(true)
 	let close: (() => void | Promise<void>) | undefined
 	makeMessagesSocket.mockReturnValue({
 		userDevicesCache: {},
@@ -93,7 +94,7 @@ function setup(store: CacheStore, maxMsgRetryCount = 2, enableManager = false) {
 		upsertMessage: jest.fn(),
 		resyncAppState: jest.fn(),
 		onUnexpectedError,
-		assertSessions: async () => true,
+		assertSessions,
 		sendNode,
 		relayMessage,
 		sendReceipt: jest.fn(),
@@ -123,6 +124,7 @@ function setup(store: CacheStore, maxMsgRetryCount = 2, enableManager = false) {
 		sendNode,
 		relayMessage,
 		getMessage,
+		assertSessions,
 		onUnexpectedError,
 		manager,
 		close: async () => {
@@ -183,6 +185,7 @@ describe('socket retry budget integration', () => {
 				second.handlers.get('CB:receipt')!(makeReceipt())
 			])
 			expect(first.relayMessage.mock.calls.length + second.relayMessage.mock.calls.length).toBe(1)
+			expect(first.assertSessions.mock.calls.length + second.assertSessions.mock.calls.length).toBe(1)
 		} finally {
 			await first.close()
 			await second.close()

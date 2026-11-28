@@ -49,7 +49,7 @@ import {
 	xmppPreKey,
 	xmppSignedPreKey
 } from '../Utils'
-import { makeMutex } from '../Utils/make-mutex'
+import { type KeyedMutex, makeKeyedMutex, makeMutex } from '../Utils/make-mutex'
 import { isOfflineNode, makeOfflineNodeProcessor, type MessageType } from '../Utils/offline-node-processor'
 import { RetryBudget } from '../Utils/retry-budget'
 import { makeCachedLegacyRetryBudgetInitializer } from '../Utils/retry-budget-migration'
@@ -88,6 +88,10 @@ import {
 } from '../WABinary'
 import { extractGroupMetadata } from './groups'
 import { makeMessagesSocket } from './messages-send'
+
+// Share resend preparation locks between sockets using the same retry cache.
+// This is process-local; separate cache objects/processes still need external coordination.
+const resendLocksByCache = new WeakMap<CacheStore, KeyedMutex>()
 
 type MexGqlData = Record<string, unknown>
 
@@ -163,6 +167,12 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		maxMsgRetryCount,
 		makeCachedLegacyRetryBudgetInitializer(msgRetryCache, DEFAULT_CACHE_TTLS.MSG_RETRY * 1000)
 	)
+	let resendLocks = resendLocksByCache.get(msgRetryCache)
+	if (!resendLocks) {
+		resendLocks = makeKeyedMutex()
+		resendLocksByCache.set(msgRetryCache, resendLocks)
+	}
+
 	const callOfferCache =
 		config.callOfferCache ||
 		new NodeCache<WACallEvent>({
@@ -1628,9 +1638,13 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	const sendMessagesAgain = (key: WAMessageKey, ids: string[], retryNode: BinaryNode, receiptNode: BinaryNode) => {
 		const remoteJid = key.remoteJid!
 		const preparedRetries = ids.map(id => messageRetryCoordinator.prepareRetry(remoteJid, id))
-		return messageRetryCoordinator
-			.withMessageLocks(remoteJid, ids, () =>
-				sendMessagesAgainPrepared(key, ids, retryNode, receiptNode, preparedRetries)
+		// Session state is participant-scoped, so serialize the pre-check, session
+		// preparation and resend together, even across sockets sharing this cache.
+		return resendLocks
+			.mutex(key.participant!, () =>
+				messageRetryCoordinator.withMessageLocks(remoteJid, ids, () =>
+					sendMessagesAgainPrepared(key, ids, retryNode, receiptNode, preparedRetries)
+				)
 			)
 			.finally(() => {
 				for (const preparedRetry of preparedRetries) preparedRetry.finish()
