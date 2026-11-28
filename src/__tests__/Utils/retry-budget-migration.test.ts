@@ -132,6 +132,35 @@ describe('bounded legacy retry migration', () => {
 		expect(values.get('retry:v2:legacy-deadline')).toBe(110)
 	})
 
+	it('does not extend the window after the cached deadline is evicted', async () => {
+		const { store, values } = memoryStore()
+		values.set('id:undefined', 4)
+		let now = 10
+		const first = makeCachedLegacyRetryBudgetInitializer(store, 100, () => now)
+		expect(await first(identity)).toBe(4)
+		values.delete('retry:v2:legacy-deadline')
+		now = 50
+		const next = makeCachedLegacyRetryBudgetInitializer(store, 100, () => now)
+		expect(await next(identity)).toBe(4)
+		expect(values.get('retry:v2:legacy-deadline')).toBe(110)
+		values.delete('retry:v2:legacy-deadline')
+		now = 110
+		expect(await makeCachedLegacyRetryBudgetInitializer(store, 100, () => now)(identity)).toBeUndefined()
+		expect(values.has('retry:v2:legacy-deadline')).toBe(false)
+	})
+
+	it('retains an earlier stored deadline after eviction', async () => {
+		const { store, values } = memoryStore()
+		values.set('id:undefined', 4)
+		values.set('retry:v2:legacy-deadline', 50)
+		let now = 10
+		const first = makeCachedLegacyRetryBudgetInitializer(store, 100, () => now)
+		expect(await first(identity)).toBe(4)
+		values.delete('retry:v2:legacy-deadline')
+		now = 50
+		expect(await makeCachedLegacyRetryBudgetInitializer(store, 100, () => now)(identity)).toBeUndefined()
+	})
+
 	it('fails closed on corrupt migration deadline and write failures', async () => {
 		const { store, values } = memoryStore()
 		values.set('retry:v2:legacy-deadline', 'invalid')

@@ -4,8 +4,10 @@ import type { RetryBudgetIdentity } from './retry-budget'
 
 const MIGRATION_DEADLINE_KEY = 'retry:v2:legacy-deadline'
 const migrationLocks = new WeakMap<CacheStore, KeyedMutex>()
+// Keep a process-local ceiling even if the backing cache evicts its deadline.
+const processDeadlines = new WeakMap<CacheStore, number>()
 
-/** Persist an absolute deadline rather than extending the window at every socket restart. */
+/** Persist an absolute deadline, bounded locally even if its cache entry is evicted. */
 export function makeCachedLegacyRetryBudgetInitializer(
 	store: CacheStore,
 	windowMs: number,
@@ -18,6 +20,11 @@ export function makeCachedLegacyRetryBudgetInitializer(
 		migrationLocks.set(store, locks)
 	}
 
+	const calculated = now() + windowMs
+	if (!Number.isSafeInteger(calculated) || calculated < 0) throw new Error('Invalid legacy retry migration deadline')
+	const localDeadline = Math.min(processDeadlines.get(store) ?? calculated, calculated)
+	processDeadlines.set(store, localDeadline)
+
 	const mutex = locks
 	return async identity => {
 		const deadline = await mutex.mutex(MIGRATION_DEADLINE_KEY, async () => {
@@ -27,17 +34,18 @@ export function makeCachedLegacyRetryBudgetInitializer(
 					throw new Error('Invalid stored legacy retry migration deadline')
 				}
 
-				return stored
+				const deadline = Math.min(stored, processDeadlines.get(store)!)
+				processDeadlines.set(store, deadline)
+				return deadline
 			}
 
-			const calculated = now() + windowMs
-			if (!Number.isSafeInteger(calculated) || calculated < 0)
-				throw new Error('Invalid legacy retry migration deadline')
-			if ((await store.set(MIGRATION_DEADLINE_KEY, calculated)) === false) {
+			const deadline = processDeadlines.get(store)!
+			if (now() >= deadline) return deadline
+			if ((await store.set(MIGRATION_DEADLINE_KEY, deadline)) === false) {
 				throw new Error('Failed to persist legacy retry migration deadline')
 			}
 
-			return calculated
+			return deadline
 		})
 		return makeLegacyRetryBudgetInitializer(store, deadline, now)(identity)
 	}
