@@ -5,6 +5,7 @@ import Long from 'long'
 import { proto } from '../../WAProto/index.js'
 import { DEFAULT_CACHE_TTLS, KEY_BUNDLE_TYPE, PLACEHOLDER_MAX_AGE_SECONDS, STATUS_EXPIRY_SECONDS } from '../Defaults'
 import type {
+	CacheStore,
 	GroupParticipant,
 	MessageReceiptType,
 	MessageRelayOptions,
@@ -48,8 +49,10 @@ import {
 	xmppPreKey,
 	xmppSignedPreKey
 } from '../Utils'
-import { makeMutex } from '../Utils/make-mutex'
+import { type KeyedMutex, makeKeyedMutex, makeMutex } from '../Utils/make-mutex'
 import { isOfflineNode, makeOfflineNodeProcessor, type MessageType } from '../Utils/offline-node-processor'
+import { RetryBudget } from '../Utils/retry-budget'
+import { makeCachedLegacyRetryBudgetInitializer } from '../Utils/retry-budget-migration'
 import { handleServerEncryptNotification } from '../Utils/server-encrypt-notification'
 import { buildAckStanza } from '../Utils/stanza-ack'
 import {
@@ -85,6 +88,10 @@ import {
 } from '../WABinary'
 import { extractGroupMetadata } from './groups'
 import { makeMessagesSocket } from './messages-send'
+
+// Share resend preparation locks between sockets using the same retry cache.
+// This is process-local; separate cache objects/processes still need external coordination.
+const resendLocksByCache = new WeakMap<CacheStore, KeyedMutex>()
 
 type MexGqlData = Record<string, unknown>
 
@@ -149,10 +156,30 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 	const msgRetryCache =
 		config.msgRetryCounterCache ||
-		new NodeCache<number>({
+		(new NodeCache<number>({
 			stdTTL: DEFAULT_CACHE_TTLS.MSG_RETRY, // 1 hour
 			useClones: false
-		})
+		}) as CacheStore)
+	// The default cache is temporary and in-memory; a durable custom cache is
+	// needed to retain budgets and the migration deadline across restarts.
+	const legacyWindowMs = DEFAULT_CACHE_TTLS.MSG_RETRY * 1000
+	const cacheLegacyInitializer = makeCachedLegacyRetryBudgetInitializer(msgRetryCache, legacyWindowMs)
+	const retryBudget = new RetryBudget(
+		msgRetryCache,
+		maxMsgRetryCount,
+		async identity => {
+			const durableDeadline = await config.retryBudgetStore?.legacyDeadline?.(legacyWindowMs)
+			if (durableDeadline !== undefined && Date.now() >= durableDeadline) return undefined
+			return cacheLegacyInitializer(identity)
+		},
+		config.retryBudgetStore
+	)
+	let resendLocks = resendLocksByCache.get(msgRetryCache)
+	if (!resendLocks) {
+		resendLocks = makeKeyedMutex()
+		resendLocksByCache.set(msgRetryCache, resendLocks)
+	}
+
 	const callOfferCache =
 		config.callOfferCache ||
 		new NodeCache<WACallEvent>({
@@ -682,37 +709,18 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		const msgId = msgKey.id!
 		const retryTo = msgKey.remoteJid ?? undefined
 
-		if (messageRetryManager) {
-			// Check if we've exceeded max retries using the new system
-			if (messageRetryManager.hasExceededMaxRetries(msgId, retryTo)) {
-				logger.debug({ msgId }, 'reached retry limit with new retry manager, clearing')
-				messageRetryManager.markRetryFailed(msgId, retryTo)
-				return
-			}
-
-			// Increment retry count using new system
-			const retryCount = messageRetryManager.incrementRetryCount(msgId, retryTo)
-
-			// Use the new retry count for the rest of the logic
-			const key = `${msgId}:${msgKey?.participant}`
-			await msgRetryCache.set(key, retryCount)
-		} else {
-			// Fallback to old system
-			const key = `${msgId}:${msgKey?.participant}`
-			// a cache miss means "never seen", not "zero retries": it must not reset the counter
-			let retryCount = (await msgRetryCache.get<number>(key)) ?? 1
-			if (retryCount >= maxMsgRetryCount) {
-				logger.debug({ retryCount, msgId }, 'reached retry limit, clearing')
-				await msgRetryCache.del(key)
-				return
-			}
-
-			retryCount += 1
-			await msgRetryCache.set(key, retryCount)
+		const budget = await retryBudget.consume({
+			chat: msgKey.remoteJid!,
+			messageId: msgId,
+			participant: msgKey.participant,
+			direction: 'incoming'
+		})
+		if (!budget.accepted) {
+			logger.debug({ msgId, retryCount: budget.count }, 'reached retry limit')
+			return
 		}
 
-		const key = `${msgId}:${msgKey?.participant}`
-		const retryCount = (await msgRetryCache.get<number>(key)) ?? 1
+		const retryCount = budget.count
 
 		const { account, signedPreKey, signedIdentityKey: identityKey } = authState.creds
 		const fromJid = node.attrs.from!
@@ -1422,18 +1430,6 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		return data instanceof Buffer ? data : Buffer.from(data)
 	}
 
-	const willSendMessageAgain = async (id: string, participant: string) => {
-		const key = `${id}:${participant}`
-		const retryCount = (await msgRetryCache.get<number>(key)) ?? 0
-		return retryCount < maxMsgRetryCount
-	}
-
-	const updateSendMessageAgainCount = async (id: string, participant: string) => {
-		const key = `${id}:${participant}`
-		const newValue = ((await msgRetryCache.get<number>(key)) ?? 0) + 1
-		await msgRetryCache.set(key, newValue)
-	}
-
 	const sendMessagesAgainPrepared = async (
 		key: WAMessageKey,
 		ids: string[],
@@ -1489,7 +1485,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 		const retryableIds: string[] = []
 		const retryablePreparedRetries: PreparedMessageRetry[] = []
-		const retryableMessages: (proto.IMessage | undefined)[] = []
+		const retryableMessages: proto.IMessage[] = []
 		for (const [index, id] of activeIds.entries()) {
 			const preparedRetry = activePreparedRetries[index]
 			if (!preparedRetry) continue
@@ -1499,7 +1495,22 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 			}
 
 			const msg = msgs[index]
-			if (msg) messageRetryManager?.markRetrySuccess(id, remoteJid)
+			if (!msg) {
+				logger.debug({ jid: remoteJid, id }, 'recv retry request, but message not available')
+				continue
+			}
+
+			const budget = await retryBudget.peek({ chat: remoteJid, messageId: id, participant, direction: 'outgoing' })
+			if (!budget.accepted) {
+				logger.debug({ jid: remoteJid, id, retryCount: budget.count }, 'reached retry limit for resend')
+				continue
+			}
+
+			if (preparedRetry.isCancelled() || messageRetryCoordinator.isMessageInvalidated(remoteJid, id)) {
+				logger.debug({ jid: remoteJid, id }, 'retry invalidated during budget lookup')
+				continue
+			}
+
 			retryableIds.push(id)
 			retryablePreparedRetries.push(preparedRetry)
 			retryableMessages.push(msg)
@@ -1601,35 +1612,50 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 					return
 				}
 
-				if (msg && (await willSendMessageAgain(id, participant))) {
-					await updateSendMessageAgainCount(id, participant)
-					const msgRelayOpts: MessageRelayOptions = { messageId: id }
-
-					if (sendToAll) {
-						msgRelayOpts.useUserDevicesCache = false
-					} else {
-						msgRelayOpts.participant = {
-							jid: participant,
-							count: +retryNode.attrs.count!
-						}
-					}
-
-					await relayMessage(key.remoteJid!, msg, msgRelayOpts)
-				} else {
-					logger.debug({ jid: key.remoteJid, id }, 'recv retry request, but message not available')
+				const budget = await retryBudget.consume({ chat: remoteJid, messageId: id, participant, direction: 'outgoing' })
+				if (!budget.accepted) {
+					logger.debug({ jid: remoteJid, id, retryCount: budget.count }, 'reached retry limit for resend')
+					return
 				}
+
+				if (preparedRetry.isCancelled() || messageRetryCoordinator.isMessageInvalidated(remoteJid, id)) {
+					logger.debug({ jid: remoteJid, id }, 'retry invalidated after budget consumption')
+					return
+				}
+
+				const msgRelayOpts: MessageRelayOptions = { messageId: id }
+
+				if (sendToAll) {
+					msgRelayOpts.useUserDevicesCache = false
+				} else {
+					msgRelayOpts.participant = {
+						jid: participant,
+						count: +retryNode.attrs.count!
+					}
+				}
+
+				await relayMessage(key.remoteJid!, msg, msgRelayOpts)
+				messageRetryManager?.markRetrySuccess(id, remoteJid)
 			}
 
-			await resend()
+			try {
+				await resend()
+			} catch (error: unknown) {
+				onUnexpectedError(error instanceof Error ? error : new Error(String(error)), `sending message again (${id})`)
+			}
 		}
 	}
 
 	const sendMessagesAgain = (key: WAMessageKey, ids: string[], retryNode: BinaryNode, receiptNode: BinaryNode) => {
 		const remoteJid = key.remoteJid!
 		const preparedRetries = ids.map(id => messageRetryCoordinator.prepareRetry(remoteJid, id))
-		return messageRetryCoordinator
-			.withMessageLocks(remoteJid, ids, () =>
-				sendMessagesAgainPrepared(key, ids, retryNode, receiptNode, preparedRetries)
+		// Session state is participant-scoped, so serialize the pre-check, session
+		// preparation and resend together, even across sockets sharing this cache.
+		return resendLocks
+			.mutex(key.participant!, () =>
+				messageRetryCoordinator.withMessageLocks(remoteJid, ids, () =>
+					sendMessagesAgainPrepared(key, ids, retryNode, receiptNode, preparedRetries)
+				)
 			)
 			.finally(() => {
 				for (const preparedRetry of preparedRetries) preparedRetry.finish()
@@ -1725,23 +1751,15 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 						// correctly set who is asking for the retry
 						key.participant = key.participant || attrs.from
 						const retryNode = getBinaryNodeChild(node, 'retry')
-						if (ids[0] && key.participant && (await willSendMessageAgain(ids[0], key.participant))) {
-							if (key.fromMe) {
-								try {
-									await updateSendMessageAgainCount(ids[0], key.participant)
-									logger.debug({ attrs, key }, 'recv retry request')
-									await sendMessagesAgain(key, ids, retryNode!, node)
-								} catch (error: unknown) {
-									logger.error(
-										{ key, ids, trace: error instanceof Error ? error.stack : 'Unknown error' },
-										'error in sending message again'
-									)
-								}
-							} else {
-								logger.info({ attrs, key }, 'recv retry for not fromMe message')
+						if (ids[0] && key.participant && key.remoteJid && retryNode && key.fromMe) {
+							try {
+								logger.debug({ attrs, key }, 'recv retry request')
+								await sendMessagesAgain(key, ids, retryNode, node)
+							} catch (error: unknown) {
+								onUnexpectedError(error instanceof Error ? error : new Error(String(error)), 'sending message again')
 							}
 						} else {
-							logger.info({ attrs, key }, 'will not send message again, as sent too many times')
+							logger.info({ attrs, key }, 'invalid retry receipt or message not from this account')
 						}
 					}
 				})
@@ -1906,9 +1924,13 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 						}
 						// honour a caller-supplied retry cache here too: a stored count at the
 						// ceiling means the caller does not want another placeholder request
-						const retryKey = `${msg.key.id}:${msg.key.participant}`
-						const retryCount = (await msgRetryCache.get<number>(retryKey)) ?? 0
-						if (retryCount < maxMsgRetryCount) {
+						const budget = await retryBudget.peek({
+							chat: msg.key.remoteJid!,
+							messageId: msg.key.id!,
+							participant: msg.key.participant,
+							direction: 'incoming'
+						})
+						if (budget.accepted) {
 							requestPlaceholderResend(cleanKey, msgData)
 								.then(requestId => {
 									if (requestId && requestId !== 'RESOLVED') {
@@ -1979,7 +2001,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 									await delay(retryRequestDelayMs)
 								}
 							} catch (err) {
-								logger.error({ err }, 'Failed to send retry')
+								onUnexpectedError(err instanceof Error ? err : new Error(String(err)), 'sending retry request')
 							}
 
 							acked = true
