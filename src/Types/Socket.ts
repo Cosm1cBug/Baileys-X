@@ -2,6 +2,7 @@ import type { Agent } from 'https'
 import type { URL } from 'url'
 import { proto } from '../../WAProto/index.js'
 import type { ILogger } from '../Utils/logger'
+import type { RetryBudgetAtomicStore } from '../Utils/retry-budget'
 import type { AuthenticationState, LIDMapping, SignalAuthState, TransactionCapabilityOptions } from './Auth'
 import type { GroupMetadata } from './GroupMetadata'
 import { type MediaConnInfo, type WAMessageKey } from './Message'
@@ -93,6 +94,8 @@ export type SocketConfig = {
 	 * map to store the retry counts for failed messages;
 	 * used to determine whether to retry a message or not */
 	msgRetryCounterCache?: CacheStore
+	/** Optional durable atomic store for retry budgets; the application owns its lifecycle. */
+	retryBudgetStore?: RetryBudgetAtomicStore
 	/** provide a cache to store a user's device list */
 	userDevicesCache?: PossiblyExtendedCacheStore
 	/** cache to store call offers */

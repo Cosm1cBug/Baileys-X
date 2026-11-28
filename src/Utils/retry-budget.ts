@@ -11,6 +11,14 @@ export type RetryBudgetIdentity = {
 
 export type RetryBudgetResult = { accepted: true; count: number } | { accepted: false; count: number }
 
+/** Implementations must atomically initialize, check and optionally increment a key. */
+export type RetryBudgetAtomicStore = {
+	get(key: string): number | undefined | Promise<number | undefined>
+	apply(key: string, limit: number, initial: number, consume: boolean): RetryBudgetResult | Promise<RetryBudgetResult>
+	/** Optionally store a shared fixed legacy-migration deadline. */
+	legacyDeadline?(windowMs: number): number | Promise<number>
+}
+
 /** Unambiguous, versioned encoding; null participant is distinct from every string. */
 export function retryBudgetKey(identity: RetryBudgetIdentity): string {
 	const { chat, messageId, participant, direction } = identity
@@ -44,7 +52,8 @@ export class RetryBudget {
 	constructor(
 		private readonly store: CacheStore,
 		private readonly limit: number,
-		private readonly initializeMissing?: (identity: RetryBudgetIdentity) => Promise<unknown>
+		private readonly initializeMissing?: (identity: RetryBudgetIdentity) => Promise<unknown>,
+		private readonly atomicStore?: RetryBudgetAtomicStore
 	) {
 		if (!Number.isSafeInteger(limit) || limit < 0) throw new Error('Invalid retry budget limit')
 		let locks = locksByStore.get(store)
@@ -73,10 +82,19 @@ export class RetryBudget {
 		return count
 	}
 
+	private async applyAtomic(key: string, identity: RetryBudgetIdentity, consume: boolean): Promise<RetryBudgetResult> {
+		const existing = await this.atomicStore!.get(key)
+		// An absent SQLite row is seeded from the prior v2 cache or its bounded
+		// legacy initializer. The atomic store rechecks after this async lookup.
+		const initial = existing === undefined ? await this.readCount(key, identity) : 0
+		return this.atomicStore!.apply(key, this.limit, initial, consume)
+	}
+
 	/** Inspect without consuming; a legacy count may be persisted on first read. */
 	async peek(identity: RetryBudgetIdentity): Promise<RetryBudgetResult> {
 		const key = retryBudgetKey(identity)
 		return this.locks.mutex(key, async () => {
+			if (this.atomicStore) return this.applyAtomic(key, identity, false)
 			const count = await this.readCount(key, identity)
 			return count >= this.limit ? { accepted: false, count } : { accepted: true, count }
 		})
@@ -86,6 +104,7 @@ export class RetryBudget {
 	async consume(identity: RetryBudgetIdentity): Promise<RetryBudgetResult> {
 		const key = retryBudgetKey(identity)
 		return this.locks.mutex(key, async () => {
+			if (this.atomicStore) return this.applyAtomic(key, identity, true)
 			const count = await this.readCount(key, identity)
 			if (count >= this.limit) return { accepted: false, count }
 			const next = count + 1

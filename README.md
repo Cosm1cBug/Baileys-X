@@ -393,6 +393,37 @@ const sock = makeWASocket({ auth: state })
 sock.ev.on('creds.update', saveCreds)
 ```
 
+### Optional persistent retry budgets with better-sqlite3
+
+Retry budgets are separate from authentication state and temporary metadata caches. By default the retry cache is in memory with a TTL; limits can reset after a restart or eviction. To opt into durable, atomic retry-budget counters, install `better-sqlite3` and use an application-owned SQLite database:
+
+```ts
+import Database from 'better-sqlite3'
+import { mkdirSync } from 'node:fs'
+import makeWASocket, { makeSQLiteRetryBudgetStore, useMultiFileAuthState } from '@whiskeysockets/baileys'
+
+mkdirSync('./data', { recursive: true })
+const db = new Database('./data/retry-budget.db')
+db.pragma('journal_mode = WAL')
+db.pragma('busy_timeout = 5000')
+db.pragma('synchronous = NORMAL')
+
+const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys')
+const sock = makeWASocket({
+    auth: state,
+    retryBudgetStore: makeSQLiteRetryBudgetStore(db),
+    // If upgrading, also pass your existing msgRetryCounterCache here to seed
+    // missing SQLite counters from its v2 and bounded legacy entries.
+})
+sock.ev.on('creds.update', saveCreds)
+
+// On shutdown, stop the socket and wait for in-flight operations before db.close().
+```
+
+The adapter uses `BEGIN IMMEDIATE` to initialize, check, and increment a counter atomically, including across connections to the same SQLite database. It never expires or deletes counters; manage database growth and backups deliberately. Use one database per WhatsApp account: keys do not include the local account. Use SQLite on storage with reliable SQLite locking; this is not a Redis or multi-host coordination adapter. WAL and `synchronous = NORMAL` have power-loss durability trade-offs; select SQLite settings appropriate for your environment. SQLite calls are synchronous and can block the event loop while waiting for locks.
+
+For an upgrade, keep the previous retry cache available while missing SQLite rows are initialized. A lost or expired old cache cannot be recovered by SQLite. Stop old writers before migrating; mixed old/new workers and independently different legacy caches cannot safely coordinate migration. SQLite persists an upper bound for its legacy migration window; the old cache's deadline may stop migration earlier. Once a SQLite row exists, the SQLite counter is authoritative. Retry session preparation remains process-local, even when SQLite makes the budget increment atomic.
+
 > [!NOTE]
 > When a message is received/sent, due to signal sessions needing updating, the auth keys (`authState.keys`) will update. Whenever that happens, you must save the updated keys (`authState.keys.set()` is called). Not doing so will prevent your messages from reaching the recipient & cause other unexpected consequences. The `useMultiFileAuthState` function automatically takes care of that, but for any other serious implementation -- you will need to be very careful with the key state management.
 

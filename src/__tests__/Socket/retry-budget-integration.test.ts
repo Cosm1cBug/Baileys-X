@@ -3,7 +3,7 @@ import type { proto } from '../../../WAProto/index.js'
 import type { CacheStore, SocketConfig } from '../../Types'
 import type { ILogger } from '../../Utils/logger'
 import { MessageRetryCoordinator, MessageRetryManager } from '../../Utils/message-retry-manager'
-import { retryBudgetKey } from '../../Utils/retry-budget'
+import { type RetryBudgetAtomicStore, retryBudgetKey } from '../../Utils/retry-budget'
 import type { BinaryNode } from '../../WABinary'
 
 const makeMessagesSocket = jest.fn()
@@ -54,7 +54,12 @@ function makeReceipt(from = chat, messageId = id): BinaryNode {
 	}
 }
 
-function setup(store: CacheStore, maxMsgRetryCount = 2, enableManager = false) {
+function setup(
+	store: CacheStore,
+	maxMsgRetryCount = 2,
+	enableManager = false,
+	retryBudgetStore?: RetryBudgetAtomicStore
+) {
 	const handlers = new Map<string, (node: BinaryNode) => Promise<void> | void>()
 	const coordinator = new MessageRetryCoordinator()
 	const manager = enableManager ? new MessageRetryManager(logger, maxMsgRetryCount, coordinator) : null
@@ -113,6 +118,7 @@ function setup(store: CacheStore, maxMsgRetryCount = 2, enableManager = false) {
 		logger,
 		maxMsgRetryCount,
 		msgRetryCounterCache: store,
+		retryBudgetStore,
 		getMessage,
 		shouldIgnoreJid: () => false,
 		retryRequestDelayMs: 0,
@@ -151,6 +157,35 @@ describe('socket retry budget integration', () => {
 		}
 
 		const second = setup(store)
+		try {
+			await second.handlers.get('CB:receipt')!(makeReceipt())
+			expect(second.relayMessage).not.toHaveBeenCalled()
+		} finally {
+			await second.close()
+		}
+	})
+
+	it('uses an opted-in atomic store as the budget source across cache replacement', async () => {
+		const values = new Map<string, number>()
+		const atomicStore: RetryBudgetAtomicStore = {
+			get: key => values.get(key),
+			apply: (key, limit, initial, consume) => {
+				let count = values.get(key) ?? initial
+				const accepted = count < limit
+				if (accepted && consume) count++
+				values.set(key, count)
+				return { accepted, count }
+			}
+		}
+		const first = setup(memoryStore().store, 1, false, atomicStore)
+		try {
+			await first.handlers.get('CB:receipt')!(makeReceipt())
+			expect(first.relayMessage).toHaveBeenCalledTimes(1)
+		} finally {
+			await first.close()
+		}
+
+		const second = setup(memoryStore().store, 1, false, atomicStore)
 		try {
 			await second.handlers.get('CB:receipt')!(makeReceipt())
 			expect(second.relayMessage).not.toHaveBeenCalled()

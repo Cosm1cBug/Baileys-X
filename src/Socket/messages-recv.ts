@@ -162,10 +162,17 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		}) as CacheStore)
 	// The default cache is temporary and in-memory; a durable custom cache is
 	// needed to retain budgets and the migration deadline across restarts.
+	const legacyWindowMs = DEFAULT_CACHE_TTLS.MSG_RETRY * 1000
+	const cacheLegacyInitializer = makeCachedLegacyRetryBudgetInitializer(msgRetryCache, legacyWindowMs)
 	const retryBudget = new RetryBudget(
 		msgRetryCache,
 		maxMsgRetryCount,
-		makeCachedLegacyRetryBudgetInitializer(msgRetryCache, DEFAULT_CACHE_TTLS.MSG_RETRY * 1000)
+		async identity => {
+			const durableDeadline = await config.retryBudgetStore?.legacyDeadline?.(legacyWindowMs)
+			if (durableDeadline !== undefined && Date.now() >= durableDeadline) return undefined
+			return cacheLegacyInitializer(identity)
+		},
+		config.retryBudgetStore
 	)
 	let resendLocks = resendLocksByCache.get(msgRetryCache)
 	if (!resendLocks) {
