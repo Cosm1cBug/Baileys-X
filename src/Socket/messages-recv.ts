@@ -186,6 +186,15 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 			stdTTL: DEFAULT_CACHE_TTLS.CALL_OFFER, // 5 mins
 			useClones: false
 		})
+	// Keep only non-signaling metadata after timeout; the offer (including relay
+	// material) is removed from the caller's cache as before.
+	const timedOutCallMetadata = new NodeCache<
+		Pick<WACallEvent, 'from' | 'callerPn' | 'isVideo' | 'isGroup' | 'groupJid'>
+	>({
+		stdTTL: DEFAULT_CACHE_TTLS.CALL_OFFER,
+		useClones: false
+	})
+	const callEventLocks = makeKeyedMutex()
 
 	// Debounce identity-change session refreshes per JID to avoid bursts
 	const identityAssertDebounce = new NodeCache<boolean>({ stdTTL: 5, useClones: false })
@@ -2062,7 +2071,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		}
 	}
 
-	const handleCall = async (node: BinaryNode) => {
+	const handleCallUnlocked = async (node: BinaryNode) => {
 		try {
 			const { attrs } = node
 			const [infoChild] = getAllBinaryNodeChildren(node)
@@ -2096,6 +2105,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 			}
 
 			if (status === 'offer') {
+				timedOutCallMetadata.del(call.id)
 				call.isVideo = !!getBinaryNodeChild(infoChild, 'video')
 				call.isGroup = infoChild.attrs.type === 'group' || !!infoChild.attrs['group-jid']
 				call.groupJid = infoChild.attrs['group-jid']
@@ -2103,12 +2113,27 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 			}
 
 			const existingCall = await callOfferCache.get<WACallEvent>(call.id)
+			const timedOut = status === 'terminate' ? timedOutCallMetadata.get(call.id) : undefined
+			const prior = existingCall || (call.from && timedOut?.from === call.from ? timedOut : undefined)
 
 			// use existing call info to populate this event
-			if (existingCall) {
-				call.isVideo = existingCall.isVideo
-				call.isGroup = existingCall.isGroup
-				call.callerPn = call.callerPn || existingCall.callerPn
+			if (prior) {
+				call.isVideo = prior.isVideo
+				call.isGroup = prior.isGroup
+				call.groupJid = call.groupJid || prior.groupJid
+				call.callerPn = call.callerPn || prior.callerPn
+			}
+
+			if (status === 'timeout' && existingCall) {
+				timedOutCallMetadata.set(call.id, {
+					from: existingCall.from,
+					callerPn: call.callerPn,
+					isVideo: call.isVideo,
+					isGroup: call.isGroup,
+					groupJid: call.groupJid
+				})
+			} else if (status === 'reject' || status === 'accept' || status === 'terminate') {
+				timedOutCallMetadata.del(call.id)
 			}
 
 			// delete data once call has ended
@@ -2122,6 +2147,12 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		} finally {
 			await sendMessageAck(node).catch(ackErr => logger.error({ ackErr }, 'failed to ack call'))
 		}
+	}
+
+	// Serialize call updates for one call, including asynchronous custom-cache I/O.
+	const handleCall = (node: BinaryNode) => {
+		const callId = getAllBinaryNodeChildren(node)[0]?.attrs['call-id']
+		return callId ? callEventLocks.mutex(callId, () => handleCallUnlocked(node)) : handleCallUnlocked(node)
 	}
 
 	const handleBadAck = async ({ attrs }: BinaryNode) => {
@@ -2405,6 +2436,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	})
 
 	registerSocketEndHandler(() => {
+		timedOutCallMetadata.close()
 		if (!config.msgRetryCounterCache && msgRetryCache.close) {
 			msgRetryCache.close()
 		}
